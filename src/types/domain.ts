@@ -56,8 +56,12 @@ export type Booking = {
   memberLevel: string;
   bookingCount: 1;
   status: BookingStatus;
-  source: "小程序" | "后台";
+  source: "小程序" | "后台" | "销售代客预约";
   createdAt: string;
+  salesUserId?: string;
+  salesUserName?: string;
+  salesRole?: string;
+  assistedAt?: string;
   signedInAt?: string;
   signInSource?: "现场二维码";
   checkedInAt?: string;
@@ -66,6 +70,7 @@ export type Booking = {
 
 export type AppState = {
   member: Member;
+  members: Member[];
   exhibitions: Exhibition[];
   rules: BookingRule[];
   sessions: ExhibitionSession[];
