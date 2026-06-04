@@ -216,10 +216,15 @@ function App() {
     return booking;
   }
 
-  function submitBooking(noticeAccepted: boolean, formValues: Record<string, string>) {
+function submitBooking(noticeAccepted: boolean, formValues: Record<string, string>) {
     if (!selectedSession) return;
     if (!noticeAccepted) {
       notify("请先勾选并确认预约须知", "error");
+      return;
+    }
+    const missingFields = missingRequiredBookingFields(exhibition, formValues);
+    if (missingFields.length > 0) {
+      notify(`请填写必填信息：${missingFields.join("、")}`, "error");
       return;
     }
 
@@ -1042,6 +1047,12 @@ function composeDateTime(date: string, time: string) {
   return `${date} ${time}`;
 }
 
+function missingRequiredBookingFields(exhibition: Exhibition, formValues: Record<string, string>) {
+  return exhibition.bookingFields
+    .filter((field) => field.required && !String(formValues[field.fieldId] ?? "").trim())
+    .map((field) => field.label);
+}
+
 function formatDateLabel(date: string) {
   return `${date.slice(5).replace("-", "月")}日 ${weekdayLabel(date)}`;
 }
@@ -1104,12 +1115,16 @@ function ConfirmBooking(props: {
         <div className="space-y-3">
           {props.exhibition.bookingFields.map((field) => (
             <label key={field.fieldId} className="block text-sm">
-              <span className="mb-1 block text-slate-500">{field.label}</span>
+              <span className="mb-1 flex items-center gap-2 text-slate-500">
+                {field.label}
+                {field.required && <span className="text-xs font-semibold text-rose-600">必填</span>}
+              </span>
               <input
                 value={formValues[field.fieldId] ?? ""}
                 onChange={(event) => setFormValues({ ...formValues, [field.fieldId]: event.target.value })}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
                 placeholder={`请输入${field.label}`}
+                required={field.required}
               />
             </label>
           ))}
@@ -1566,6 +1581,11 @@ function AssistedBookingPage(props: {
       setMessage("当前活动限制每位会员只能预约一个场次，该会员已有有效预约");
       return;
     }
+    const missingFields = missingRequiredBookingFields(selectedExhibition, formValues);
+    if (missingFields.length > 0) {
+      setMessage(`请填写必填信息：${missingFields.join("、")}`);
+      return;
+    }
     const ok = props.assistBooking(selectedMember, selectedExhibition.exhibitionId, selectedSession.sessionId, formValues);
     if (ok) {
       setMessage(`代客预约成功：${selectedMember.name} · ${selectedSession.sessionName}`);
@@ -1696,11 +1716,15 @@ function AssistedBookingPage(props: {
                 <div className="grid gap-3 md:grid-cols-2">
                   {selectedExhibition.bookingFields.map((field) => (
                     <label key={field.fieldId} className="block text-sm">
-                      <span className="mb-1 block font-medium text-slate-700">{field.label}</span>
+                      <span className="mb-1 flex items-center gap-2 font-medium text-slate-700">
+                        {field.label}
+                        {field.required && <span className="text-xs font-semibold text-rose-600">必填</span>}
+                      </span>
                       <input
                         value={formValues[field.fieldId] ?? ""}
                         onChange={(event) => setFormValues({ ...formValues, [field.fieldId]: event.target.value })}
                         placeholder={`请输入${field.label}`}
+                        required={field.required}
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
                       />
                     </label>
@@ -1843,7 +1867,7 @@ function ConfigPage(props: {
                     ...draft,
                     bookingFields: [
                       ...draft.bookingFields,
-                      { fieldId: `custom_${Date.now()}`, label: "新增字段" },
+                      { fieldId: `custom_${Date.now()}`, label: "新增字段", required: false },
                     ],
                   })
                 }
@@ -1865,6 +1889,20 @@ function ConfigPage(props: {
                     }}
                     className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-950"
                   />
+                  <label className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={field.required}
+                      className="h-4 w-4 accent-slate-950"
+                      onChange={(event) => {
+                        const nextFields = draft.bookingFields.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, required: event.target.checked } : item,
+                        );
+                        setDraft({ ...draft, bookingFields: nextFields });
+                      }}
+                    />
+                    必填
+                  </label>
                   <button
                     type="button"
                     onClick={() =>
