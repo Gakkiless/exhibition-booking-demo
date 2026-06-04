@@ -8,6 +8,43 @@ export const initialState: AppState = {
     level: "铂金会员",
     isLoggedIn: false,
   },
+  members: [
+    {
+      memberId: "MBR20260603001",
+      name: "林嘉怡",
+      phone: "138****5821",
+      level: "铂金会员",
+      isLoggedIn: false,
+    },
+    {
+      memberId: "MBR90008888",
+      name: "赵明",
+      phone: "139****7720",
+      level: "金卡会员",
+      isLoggedIn: false,
+    },
+    {
+      memberId: "MBR20260518006",
+      name: "陈知予",
+      phone: "136****9042",
+      level: "黑卡会员",
+      isLoggedIn: false,
+    },
+    {
+      memberId: "MBR20260411019",
+      name: "宋闻",
+      phone: "137****3188",
+      level: "银卡会员",
+      isLoggedIn: false,
+    },
+    {
+      memberId: "MBR20260329012",
+      name: "许安然",
+      phone: "135****6681",
+      level: "铂金会员",
+      isLoggedIn: false,
+    },
+  ],
   exhibitions: [
     {
       exhibitionId: "EXH001",
