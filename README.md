@@ -1,4 +1,4 @@
-# 线下展览活动预约报名 Demo
+# 线下活动预约报名 Demo
 
 React + TypeScript + Tailwind CSS 前端 Demo，模拟松赞小程序内的会员活动预约、个人中心、现场扫码签到，以及 B 端运营后台配置和报名管理。
 
