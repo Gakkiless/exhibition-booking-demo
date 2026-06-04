@@ -43,8 +43,6 @@ import {
   formatRange,
   hasActiveBookingForExhibition,
   internalBookedCount,
-  internalRemainingStock,
-  internalStock,
   nowText,
   publicRemainingStock,
   remainingStock,
@@ -218,7 +216,7 @@ function App() {
     setState((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
-        session.sessionId === targetSession.sessionId
+        session.sessionId === targetSession.sessionId && input.source !== "销售代客预约"
           ? { ...session, bookedCount: Math.min(session.bookedCount + 1, session.totalStock) }
           : session,
       ),
@@ -266,7 +264,7 @@ function App() {
         item.bookingId === bookingId ? { ...item, status: "cancelled", cancelledAt: nowText() } : item,
       ),
       sessions: current.sessions.map((session) =>
-        session.sessionId === booking.sessionId
+        session.sessionId === booking.sessionId && booking.source !== "销售代客预约"
           ? { ...session, bookedCount: Math.max(session.bookedCount - booking.bookingCount, 0) }
           : session,
       ),
@@ -325,7 +323,6 @@ function App() {
       startTime: "2026-06-25 14:00",
       endTime: "2026-06-25 16:00",
       totalStock: 30,
-      publicStock: 24,
       bookedCount: 0,
       status: "open",
     };
@@ -1489,7 +1486,12 @@ function AdminShell(props: {
           />
         )}
         {props.page === "sessions" && (
-          <AdminSessions sessions={selectedSessions} updateSession={props.updateSession} addSession={props.addSession} />
+          <AdminSessions
+            sessions={selectedSessions}
+            bookings={selectedBookings}
+            updateSession={props.updateSession}
+            addSession={props.addSession}
+          />
         )}
         {props.page === "bookings" && (
           <BookingList
@@ -1527,13 +1529,9 @@ function Dashboard({
 }) {
   const stats = useMemo(() => {
     const totalStock = sessions.reduce((sum, item) => sum + item.totalStock, 0);
-    const publicStock = sessions.reduce((sum, item) => sum + item.publicStock, 0);
-    const internal = sessions.reduce((sum, item) => sum + internalStock(item), 0);
     const booked = sessions.reduce((sum, item) => sum + item.bookedCount, 0);
     return {
       totalStock,
-      publicStock,
-      internal,
       booked,
       remain: totalStock - booked,
       assisted: bookings.filter((item) => item.source === "销售代客预约").length,
@@ -1548,12 +1546,10 @@ function Dashboard({
         title={`${exhibition.title} · 数据看板`}
         action={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">按单个活动统计</span>}
       >
-        <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
-        <AdminMetric label="实际库存" value={stats.totalStock} />
-        <AdminMetric label="对外库存" value={stats.publicStock} />
-        <AdminMetric label="内部库存" value={stats.internal} />
-        <AdminMetric label="已预约人数" value={stats.booked} />
-        <AdminMetric label="剩余库存" value={stats.remain} />
+        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <AdminMetric label="总库存/对外库存" value={stats.totalStock} />
+        <AdminMetric label="客用已预约人数" value={stats.booked} />
+        <AdminMetric label="客用剩余库存" value={stats.remain} />
         <AdminMetric label="内部代预约人数" value={stats.assisted} />
         <AdminMetric label="签到人数" value={stats.signed} />
         <AdminMetric label="取消人数" value={stats.cancelled} />
@@ -1572,7 +1568,7 @@ function Dashboard({
                 <div className="mb-2 flex items-center justify-between text-sm">
                   <span className="font-medium text-slate-700">{session.sessionName}</span>
                   <span className="text-slate-500">
-                    预约 {session.bookedCount}/{session.totalStock} · 对外 {session.publicStock} · 内部代约 {assisted} · 签到 {signed}
+                    客用预约 {session.bookedCount}/{session.totalStock} · 内部代约 {assisted} · 签到 {signed}
                   </span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -1662,7 +1658,7 @@ function AssistedBookingPage(props: {
       return;
     }
     if (!canSalesBookSession(selectedSession, props.bookings)) {
-      setMessage(`该场次${statusText(displaySessionStatus(selectedSession, props.bookings, "sales"))}，内部库存不可预约`);
+      setMessage(`该场次${statusText(displaySessionStatus(selectedSession, props.bookings, "sales"))}，销售不可代约`);
       return;
     }
     if (activeBookingBlocked) {
@@ -1785,7 +1781,7 @@ function AssistedBookingPage(props: {
                         <span className="rounded-full bg-white/20 px-2 py-1 text-xs">{statusText(displayStatus)}</span>
                       </div>
                       <div className="mt-3 text-xs opacity-75">
-                        内部剩余 {Math.min(remainingStock(session), internalRemainingStock(session, props.bookings))} / 内部库存 {internalStock(session)}
+                        内部已代约 {internalBookedCount(props.bookings, session.sessionId)} 人 · 不占用客用库存
                       </div>
                     </button>
                   );
@@ -1813,7 +1809,7 @@ function AssistedBookingPage(props: {
             )}
 
             <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-              规则提示：销售代客预约仅可选择现有会员，不占用 C 端对外展示库存，但仍不能超过实际库存和内部销售库存，并遵守活动上架、场次状态和每会员限约一场规则。
+              规则提示：销售代客预约仅可选择现有会员，不占用 C 端客用总库存，也不会影响客人看到的剩余名额；仍遵守活动上架、场次状态和每会员限约一场规则。
               {activeBookingBlocked && (
                 <div className="mt-2 font-semibold text-rose-700">该会员已有有效预约，当前规则禁止再次预约。</div>
               )}
@@ -1857,9 +1853,9 @@ function ActivityList(props: {
         </thead>
         <tbody>
           {props.exhibitions.map((item) => {
-            const booked = props.sessions
-              .filter((session) => session.exhibitionId === item.exhibitionId)
-              .reduce((sum, session) => sum + session.bookedCount, 0);
+            const booked = props.bookings.filter(
+              (booking) => booking.exhibitionId === item.exhibitionId && booking.status !== "cancelled",
+            ).length;
             return (
               <tr key={item.exhibitionId} className="border-t border-slate-100">
                 <Td className="font-medium text-slate-950">{item.title}</Td>
@@ -2021,10 +2017,12 @@ function ConfigPage(props: {
 
 function AdminSessions({
   sessions,
+  bookings,
   updateSession,
   addSession,
 }: {
   sessions: ExhibitionSession[];
+  bookings: Booking[];
   updateSession: (next: ExhibitionSession) => void;
   addSession: () => void;
 }) {
@@ -2036,18 +2034,17 @@ function AdminSessions({
             <Th>场次名称</Th>
             <Th>日期</Th>
             <Th>时间</Th>
-            <Th>实际库存</Th>
-            <Th>对外库存</Th>
-            <Th>内部库存</Th>
-            <Th>已预约</Th>
-            <Th>剩余</Th>
+            <Th>总库存/对外库存</Th>
+            <Th>客用已预约</Th>
+            <Th>客用剩余</Th>
+            <Th>内部代约</Th>
             <Th>状态</Th>
             <Th>操作</Th>
           </tr>
         </thead>
         <tbody>
           {sessions.map((session) => (
-            <SessionRow key={session.sessionId} session={session} updateSession={updateSession} />
+            <SessionRow key={session.sessionId} session={session} bookings={bookings} updateSession={updateSession} />
           ))}
         </tbody>
       </Table>
@@ -2057,9 +2054,11 @@ function AdminSessions({
 
 function SessionRow({
   session,
+  bookings,
   updateSession,
 }: {
   session: ExhibitionSession;
+  bookings: Booking[];
   updateSession: (next: ExhibitionSession) => void;
 }) {
   const [draft, setDraft] = useState(session);
@@ -2076,10 +2075,9 @@ function SessionRow({
         </div>
       </Td>
       <Td><InlineInput type="number" value={String(draft.totalStock)} onChange={(value) => setDraft({ ...draft, totalStock: Number(value) || 0 })} /></Td>
-      <Td><InlineInput type="number" value={String(draft.publicStock)} onChange={(value) => setDraft({ ...draft, publicStock: Number(value) || 0 })} /></Td>
-      <Td>{internalStock(draft)}</Td>
       <Td>{draft.bookedCount}</Td>
       <Td>{remainingStock(draft)}</Td>
+      <Td>{internalBookedCount(bookings, draft.sessionId)}</Td>
       <Td>
         <select
           value={draft.status}
@@ -2098,7 +2096,6 @@ function SessionRow({
             onClick={() =>
               updateSession({
                 ...draft,
-                publicStock: Math.min(draft.publicStock, draft.totalStock),
                 bookedCount: Math.min(draft.bookedCount, draft.totalStock),
               })
             }
