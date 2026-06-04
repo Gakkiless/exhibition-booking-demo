@@ -19,6 +19,7 @@ import {
   Ticket,
   UserCircle2,
   UserRound,
+  UsersRound,
   X,
 } from "lucide-react";
 import "./index.css";
@@ -30,6 +31,7 @@ import type {
   BookingStatus,
   Exhibition,
   ExhibitionSession,
+  Member,
   SessionStatus,
   ToastType,
 } from "./types/domain";
@@ -39,6 +41,7 @@ import {
   createBookingCode,
   displaySessionStatus,
   formatRange,
+  hasActiveBookingForExhibition,
   nowText,
   remainingStock,
   statusText,
@@ -46,7 +49,14 @@ import {
 } from "./utils/business";
 
 type ClientPage = "detail" | "center" | "confirm" | "success" | "my" | "scan";
-type AdminPage = "dashboard" | "activities" | "config" | "sessions" | "bookings";
+type AdminPage = "dashboard" | "activities" | "config" | "sessions" | "bookings" | "assist";
+type AdminRole = "operator" | "sales";
+
+type SalesUser = {
+  salesUserId: string;
+  salesUserName: string;
+  salesRole: string;
+};
 
 type Toast = {
   message: string;
@@ -58,6 +68,7 @@ function App() {
   const [mode, setMode] = useState<"client" | "admin">("client");
   const [clientPage, setClientPage] = useState<ClientPage>("detail");
   const [adminPage, setAdminPage] = useState<AdminPage>("dashboard");
+  const [adminRole, setAdminRole] = useState<AdminRole>("operator");
   const [selectedExhibitionId, setSelectedExhibitionId] = useState("EXH001");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [lastBookingId, setLastBookingId] = useState<string | null>(null);
@@ -68,6 +79,11 @@ function App() {
   const sessions = state.sessions.filter((item) => item.exhibitionId === selectedExhibitionId);
   const selectedSession = state.sessions.find((item) => item.sessionId === selectedSessionId) ?? null;
   const lastBooking = state.bookings.find((item) => item.bookingId === lastBookingId) ?? null;
+  const activeSalesUser: SalesUser = {
+    salesUserId: "SALES001",
+    salesUserName: "周岚",
+    salesRole: "松赞销售顾问",
+  };
 
   function notify(message: string, type: ToastType = "info") {
     setToast({ message, type });
@@ -139,47 +155,85 @@ function App() {
     }
   }
 
-  function submitBooking(noticeAccepted: boolean) {
-    if (!selectedSession) return;
-    // TODO API: 提交预约前应由后端重新校验登录态、会员身份、规则和实时库存。
+  function createBookingForMember(input: {
+    member: Member;
+    exhibitionId: string;
+    sessionId: string;
+    source: Booking["source"];
+    salesUser?: SalesUser;
+  }) {
+    const targetExhibition = state.exhibitions.find((item) => item.exhibitionId === input.exhibitionId);
+    const targetRule = state.rules.find((item) => item.exhibitionId === input.exhibitionId);
+    const targetSession = state.sessions.find((item) => item.sessionId === input.sessionId);
+
+    if (!targetExhibition || !targetRule || !targetSession) {
+      notify("预约数据不完整，请重新选择活动和场次", "error");
+      return null;
+    }
+
+    // TODO API: 真实后端应统一校验会员、销售权限、预约规则和实时库存，并返回最终预约结果。
+    const validationMember =
+      input.source === "销售代客预约" ? { ...input.member, isLoggedIn: true } : input.member;
     const error = validateBooking({
-      member: state.member,
-      exhibition,
-      rule,
-      session: selectedSession,
+      member: validationMember,
+      exhibition: targetExhibition,
+      rule: targetRule,
+      session: targetSession,
       bookings: state.bookings,
-      noticeAccepted,
+      noticeAccepted: true,
     });
     if (error) {
       notify(error, "error");
-      return;
+      return null;
     }
 
+    const createdAt = nowText();
     const booking: Booking = {
       bookingId: `BKG${Date.now()}`,
       bookingCode: createBookingCode(),
-      exhibitionId: exhibition.exhibitionId,
-      sessionId: selectedSession.sessionId,
-      memberId: state.member.memberId,
-      memberName: state.member.name,
-      memberPhone: state.member.phone,
-      memberLevel: state.member.level,
+      exhibitionId: targetExhibition.exhibitionId,
+      sessionId: targetSession.sessionId,
+      memberId: input.member.memberId,
+      memberName: input.member.name,
+      memberPhone: input.member.phone,
+      memberLevel: input.member.level,
       bookingCount: 1,
       status: "pending_use",
-      source: "小程序",
-      createdAt: nowText(),
+      source: input.source,
+      createdAt,
+      salesUserId: input.salesUser?.salesUserId,
+      salesUserName: input.salesUser?.salesUserName,
+      salesRole: input.salesUser?.salesRole,
+      assistedAt: input.salesUser ? createdAt : undefined,
     };
 
     setState((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
-        session.sessionId === selectedSession.sessionId
+        session.sessionId === targetSession.sessionId
           ? { ...session, bookedCount: Math.min(session.bookedCount + 1, session.totalStock) }
           : session,
       ),
       bookings: [booking, ...current.bookings],
     }));
     setLastBookingId(booking.bookingId);
+    return booking;
+  }
+
+  function submitBooking(noticeAccepted: boolean) {
+    if (!selectedSession) return;
+    if (!noticeAccepted) {
+      notify("请先勾选并确认预约须知", "error");
+      return;
+    }
+
+    const booking = createBookingForMember({
+      member: state.member,
+      exhibitionId: exhibition.exhibitionId,
+      sessionId: selectedSession.sessionId,
+      source: "小程序",
+    });
+    if (!booking) return;
     setClientPage("success");
     notify("预约成功，已生成入场凭证", "success");
   }
@@ -268,6 +322,19 @@ function App() {
     notify("已新增场次", "success");
   }
 
+  function assistBooking(member: Member, exhibitionId: string, sessionId: string) {
+    const booking = createBookingForMember({
+      member,
+      exhibitionId,
+      sessionId,
+      source: "销售代客预约",
+      salesUser: activeSalesUser,
+    });
+    if (!booking) return false;
+    notify(`已为 ${member.name} 完成代客预约`, "success");
+    return true;
+  }
+
   return (
     <div className="min-h-screen">
       <TopNav mode={mode} setMode={setMode} />
@@ -305,6 +372,9 @@ function App() {
         ) : (
           <AdminShell
             state={state}
+            adminRole={adminRole}
+            setAdminRole={setAdminRole}
+            salesUser={activeSalesUser}
             selectedExhibitionId={selectedExhibitionId}
             setSelectedExhibitionId={setSelectedExhibitionId}
             page={adminPage}
@@ -315,6 +385,7 @@ function App() {
             addSession={addSession}
             cancelBooking={cancelBooking}
             checkInBooking={checkInBooking}
+            assistBooking={assistBooking}
           />
         )}
       </main>
@@ -1118,6 +1189,9 @@ function MyBookings(props: {
 
 function AdminShell(props: {
   state: AppState;
+  adminRole: AdminRole;
+  setAdminRole: (role: AdminRole) => void;
+  salesUser: SalesUser;
   selectedExhibitionId: string;
   setSelectedExhibitionId: (id: string) => void;
   page: AdminPage;
@@ -1128,6 +1202,7 @@ function AdminShell(props: {
   addSession: () => void;
   cancelBooking: (bookingId: string) => void;
   checkInBooking: (bookingId: string) => void;
+  assistBooking: (member: Member, exhibitionId: string, sessionId: string) => boolean;
 }) {
   const selectedExhibition = props.state.exhibitions.find(
     (item) => item.exhibitionId === props.selectedExhibitionId,
@@ -1146,12 +1221,33 @@ function AdminShell(props: {
     <div className="grid gap-5 lg:grid-cols-[240px_1fr]">
       <aside className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="mb-3 px-2 text-xs font-semibold uppercase text-slate-400">运营后台</div>
+        <div className="mb-4 rounded-lg bg-slate-50 p-1">
+          {[
+            ["operator", "运营"],
+            ["sales", "销售"],
+          ].map(([role, label]) => (
+            <button
+              key={role}
+              onClick={() => {
+                const nextRole = role as AdminRole;
+                props.setAdminRole(nextRole);
+                if (nextRole === "operator" && props.page === "assist") {
+                  props.setPage("dashboard");
+                }
+              }}
+              className={`w-1/2 rounded-md px-3 py-2 text-sm font-medium ${props.adminRole === role ? "bg-slate-950 text-white" : "text-slate-600"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         {[
           ["dashboard", "数据看板", BarChart3],
           ["activities", "活动列表", ClipboardList],
           ["config", "活动配置", Settings],
           ["sessions", "场次管理", CalendarDays],
           ["bookings", "报名名单", Ticket],
+          ...(props.adminRole === "sales" ? [["assist", "代客预约", UsersRound]] : []),
         ].map(([key, label, Icon]) => (
           <button
             key={key as string}
@@ -1208,6 +1304,17 @@ function AdminShell(props: {
             checkInBooking={props.checkInBooking}
           />
         )}
+        {props.page === "assist" && props.adminRole === "sales" && (
+          <AssistedBookingPage
+            members={props.state.members}
+            exhibitions={props.state.exhibitions}
+            rules={props.state.rules}
+            sessions={props.state.sessions}
+            bookings={props.state.bookings}
+            salesUser={props.salesUser}
+            assistBooking={props.assistBooking}
+          />
+        )}
       </section>
     </div>
   );
@@ -1221,6 +1328,7 @@ function Dashboard({ sessions, bookings }: { sessions: ExhibitionSession[]; book
       totalStock,
       booked,
       remain: totalStock - booked,
+      assisted: bookings.filter((item) => item.source === "销售代客预约").length,
       signed: bookings.filter((item) => Boolean(item.signedInAt)).length,
       checked: bookings.filter((item) => item.status === "checked_in").length,
       cancelled: bookings.filter((item) => item.status === "cancelled").length,
@@ -1229,10 +1337,11 @@ function Dashboard({ sessions, bookings }: { sessions: ExhibitionSession[]; book
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-7">
         <AdminMetric label="总库存" value={stats.totalStock} />
         <AdminMetric label="已预约人数" value={stats.booked} />
         <AdminMetric label="剩余库存" value={stats.remain} />
+        <AdminMetric label="销售代约人数" value={stats.assisted} />
         <AdminMetric label="签到人数" value={stats.signed} />
         <AdminMetric label="核销人数" value={stats.checked} />
         <AdminMetric label="取消人数" value={stats.cancelled} />
@@ -1258,6 +1367,230 @@ function Dashboard({ sessions, bookings }: { sessions: ExhibitionSession[]; book
               </div>
             );
           })}
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function AssistedBookingPage(props: {
+  members: Member[];
+  exhibitions: Exhibition[];
+  rules: BookingRule[];
+  sessions: ExhibitionSession[];
+  bookings: Booking[];
+  salesUser: SalesUser;
+  assistBooking: (member: Member, exhibitionId: string, sessionId: string) => boolean;
+}) {
+  const firstPublished = props.exhibitions.find((item) => item.status === "published") ?? props.exhibitions[0];
+  const [query, setQuery] = useState("");
+  const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [selectedExhibitionId, setSelectedExhibitionId] = useState(firstPublished?.exhibitionId ?? "");
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [message, setMessage] = useState("");
+
+  const selectedMember = props.members.find((member) => member.memberId === selectedMemberId) ?? null;
+  const selectedExhibition = props.exhibitions.find((item) => item.exhibitionId === selectedExhibitionId) ?? null;
+  const selectedRule = props.rules.find((item) => item.exhibitionId === selectedExhibitionId) ?? null;
+  const exhibitionSessions = props.sessions.filter((session) => session.exhibitionId === selectedExhibitionId);
+  const bookingDates = useMemo(() => getSessionDates(exhibitionSessions), [exhibitionSessions]);
+  const selectedSessions = exhibitionSessions.filter((session) => datePart(session.startTime) === selectedDate);
+  const selectedSession = props.sessions.find((session) => session.sessionId === selectedSessionId) ?? null;
+  const filteredMembers = props.members.filter((member) => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return true;
+    return [member.memberId, member.name, member.phone, member.level].some((value) =>
+      value.toLowerCase().includes(keyword),
+    );
+  });
+  const activeBookingBlocked =
+    Boolean(selectedMember && selectedRule?.oneSessionPerMember && selectedExhibition) &&
+    hasActiveBookingForExhibition(
+      props.bookings,
+      selectedExhibitionId,
+      selectedMember?.memberId ?? "",
+    );
+
+  React.useEffect(() => {
+    if (!bookingDates.includes(selectedDate)) {
+      setSelectedDate(bookingDates[0] ?? "");
+      setSelectedSessionId("");
+    }
+  }, [bookingDates, selectedDate]);
+
+  React.useEffect(() => {
+    setSelectedSessionId("");
+    setMessage("");
+  }, [selectedExhibitionId, selectedDate, selectedMemberId]);
+
+  function submitAssistedBooking() {
+    setMessage("");
+    if (!selectedMember) {
+      setMessage("请先从会员库选择客人");
+      return;
+    }
+    if (!selectedExhibition || !selectedRule) {
+      setMessage("请先选择有效活动");
+      return;
+    }
+    if (!selectedSession) {
+      setMessage("请先选择可预约场次");
+      return;
+    }
+    if (selectedExhibition.status !== "published") {
+      setMessage("当前活动未上架，销售不可代客预约");
+      return;
+    }
+    if (!canSelectSession(selectedSession)) {
+      setMessage(`该场次${statusText(displaySessionStatus(selectedSession))}，不可预约`);
+      return;
+    }
+    if (activeBookingBlocked) {
+      setMessage("当前活动限制每位会员只能预约一个场次，该会员已有有效预约");
+      return;
+    }
+    const ok = props.assistBooking(selectedMember, selectedExhibition.exhibitionId, selectedSession.sessionId);
+    if (ok) {
+      setMessage(`代客预约成功：${selectedMember.name} · ${selectedSession.sessionName}`);
+      setSelectedSessionId("");
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <Panel title="销售代客预约">
+        <div className="grid gap-5 xl:grid-cols-[1fr_1.2fr]">
+          <section className="space-y-4">
+            <div className="rounded-xl bg-slate-50 p-4">
+              <div className="text-xs font-semibold uppercase text-slate-400">当前销售</div>
+              <div className="mt-2 text-lg font-semibold text-slate-950">{props.salesUser.salesUserName}</div>
+              <div className="mt-1 text-sm text-slate-500">
+                {props.salesUser.salesRole} · {props.salesUser.salesUserId}
+              </div>
+            </div>
+
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium text-slate-700">搜索会员</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="输入会员ID、姓名、手机号"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+              />
+            </label>
+
+            <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+              {filteredMembers.map((member) => (
+                <button
+                  key={member.memberId}
+                  onClick={() => setSelectedMemberId(member.memberId)}
+                  className={`w-full rounded-xl border p-3 text-left ${selectedMemberId === member.memberId ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-700"}`}
+                >
+                  <div className="font-semibold">{member.name}</div>
+                  <div className={`mt-1 text-xs ${selectedMemberId === member.memberId ? "text-slate-300" : "text-slate-500"}`}>
+                    {member.memberId} / {member.phone} / {member.level}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-slate-700">选择活动</span>
+                <select
+                  value={selectedExhibitionId}
+                  onChange={(event) => setSelectedExhibitionId(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2"
+                >
+                  {props.exhibitions.map((item) => (
+                    <option key={item.exhibitionId} value={item.exhibitionId}>
+                      {item.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <ReadonlyField label="预约人数" value="固定 1 人" />
+            </div>
+
+            {selectedMember && (
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="mb-2 text-sm font-semibold text-slate-950">已选择会员</div>
+                <ReadonlyField label="会员ID" value={selectedMember.memberId} />
+                <ReadonlyField label="姓名" value={selectedMember.name} />
+                <ReadonlyField label="手机号" value={selectedMember.phone} />
+                <ReadonlyField label="会员等级" value={selectedMember.level} />
+              </div>
+            )}
+
+            <div className="rounded-xl border border-slate-200 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-950">选择日期</span>
+                <span className="text-xs text-slate-500">仅展示配置了场次的日期</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {bookingDates.map((date) => (
+                  <button
+                    key={date}
+                    onClick={() => setSelectedDate(date)}
+                    className={`rounded-lg px-3 py-2 text-sm font-medium ${selectedDate === date ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}
+                  >
+                    {formatDateLabel(date)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 p-4">
+              <div className="mb-3 text-sm font-semibold text-slate-950">选择场次</div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {selectedSessions.map((session) => {
+                  const displayStatus = displaySessionStatus(session);
+                  const disabled = !canSelectSession(session);
+                  return (
+                    <button
+                      key={session.sessionId}
+                      disabled={disabled}
+                      onClick={() => setSelectedSessionId(session.sessionId)}
+                      className={`rounded-xl border p-3 text-left ${selectedSessionId === session.sessionId ? "border-slate-950 bg-slate-950 text-white" : disabled ? "border-slate-200 bg-slate-50 text-slate-400" : "border-slate-200 bg-white text-slate-700"}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="font-semibold">{session.sessionName}</div>
+                          <div className="mt-1 text-xs opacity-75">
+                            {timePart(session.startTime)} - {timePart(session.endTime)}
+                          </div>
+                        </div>
+                        <span className="rounded-full bg-white/20 px-2 py-1 text-xs">{statusText(displayStatus)}</span>
+                      </div>
+                      <div className="mt-3 text-xs opacity-75">
+                        总 {session.totalStock} / 已约 {session.bookedCount} / 剩余 {remainingStock(session)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+              规则提示：销售代客预约仅可选择现有会员，仍遵守活动上架、库存、场次状态和每会员限约一场规则。
+              {activeBookingBlocked && (
+                <div className="mt-2 font-semibold text-rose-700">该会员已有有效预约，当前规则禁止再次预约。</div>
+              )}
+              {message && <div className="mt-2 font-semibold text-slate-950">{message}</div>}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={submitAssistedBooking} className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
+                提交代客预约
+              </button>
+              <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-400" disabled>
+                发送微信通知
+              </button>
+            </div>
+          </section>
         </div>
       </Panel>
     </div>
@@ -1489,6 +1822,7 @@ function BookingList(props: {
             <Th>签到时间</Th>
             <Th>预约时间</Th>
             <Th>来源</Th>
+            <Th>销售顾问</Th>
             <Th>操作</Th>
           </tr>
         </thead>
@@ -1517,6 +1851,16 @@ function BookingList(props: {
                 </Td>
                 <Td>{booking.createdAt}</Td>
                 <Td>{booking.source}</Td>
+                <Td>
+                  {booking.salesUserName ? (
+                    <div>
+                      <div className="font-medium text-slate-700">{booking.salesUserName}</div>
+                      <div className="text-xs text-slate-400">{booking.salesRole} / {booking.assistedAt}</div>
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">-</span>
+                  )}
+                </Td>
                 <Td>
                   <div className="flex flex-wrap gap-2">
                     <AdminAction onClick={() => window.alert(JSON.stringify(booking, null, 2))}>查看详情</AdminAction>
