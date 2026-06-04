@@ -14,6 +14,7 @@ import {
   QrCode,
   ScanLine,
   Settings,
+  Share2,
   ShieldCheck,
   Ticket,
   UserCircle2,
@@ -115,6 +116,27 @@ function App() {
     setLastBookingId(activeBooking.bookingId);
     setClientPage("scan");
     notify("现场签到成功", "success");
+  }
+
+  async function shareActivity() {
+    const shareUrl = window.location.href;
+    const shareData = {
+      title: exhibition.title,
+      text: `${exhibition.title}，可在松赞小程序预约线下展览活动。`,
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        notify("已唤起分享面板", "success");
+        return;
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      notify("分享链接已复制", "success");
+    } catch {
+      notify("分享已取消或暂不可用", "info");
+    }
   }
 
   function submitBooking(noticeAccepted: boolean) {
@@ -278,6 +300,7 @@ function App() {
             submitBooking={submitBooking}
             cancelBooking={cancelBooking}
             scanSignIn={scanSignIn}
+            shareActivity={shareActivity}
           />
         ) : (
           <AdminShell
@@ -348,6 +371,7 @@ function ClientShell(props: {
   submitBooking: (noticeAccepted: boolean) => void;
   cancelBooking: (bookingId: string) => void;
   scanSignIn: () => void;
+  shareActivity: () => void;
 }) {
   const myBookings = props.state.bookings.filter(
     (booking) => booking.memberId === props.state.member.memberId,
@@ -368,6 +392,7 @@ function ClientShell(props: {
             login={props.login}
             logout={props.logout}
             selectSession={props.selectSession}
+            shareActivity={props.shareActivity}
           />
         )}
         {props.page === "center" && (
@@ -614,6 +639,7 @@ function ClientBookingHome(props: {
   login: () => void;
   logout: () => void;
   selectSession: (sessionId: string) => void;
+  shareActivity: () => void;
 }) {
   const bookingDates = useMemo(() => getSessionDates(props.sessions), [props.sessions]);
   const [selectedDate, setSelectedDate] = useState(bookingDates[0] ?? "");
@@ -629,11 +655,21 @@ function ClientBookingHome(props: {
   return (
     <div className="space-y-4 p-4">
       <section className="overflow-hidden rounded-2xl bg-white shadow-sm">
+        <div className="relative">
         <img
           src={props.exhibition.coverImage}
           alt={props.exhibition.title}
           className="h-48 w-full object-cover"
         />
+          <button
+            onClick={props.shareActivity}
+            className="absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-950 shadow-md backdrop-blur"
+            title="分享活动"
+            aria-label="分享活动"
+          >
+            <Share2 size={18} />
+          </button>
+        </div>
         <div className="p-4">
           <div className="mb-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
             {props.exhibition.status === "published" ? "预约开放中" : "未上架"}
