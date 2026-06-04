@@ -14,10 +14,6 @@ export function remainingStock(session: ExhibitionSession) {
   return Math.max(session.totalStock - session.bookedCount, 0);
 }
 
-export function internalStock(session: ExhibitionSession) {
-  return Math.max(session.totalStock - session.publicStock, 0);
-}
-
 export function internalBookedCount(bookings: Booking[], sessionId: string) {
   return bookings.filter(
     (booking) =>
@@ -28,27 +24,25 @@ export function internalBookedCount(bookings: Booking[], sessionId: string) {
 }
 
 export function publicBookedCount(session: ExhibitionSession, bookings: Booking[]) {
-  return Math.max(session.bookedCount - internalBookedCount(bookings, session.sessionId), 0);
+  void bookings;
+  return Math.max(session.bookedCount, 0);
 }
 
 export function publicRemainingStock(session: ExhibitionSession, bookings: Booking[]) {
-  return Math.max(session.publicStock - publicBookedCount(session, bookings), 0);
-}
-
-export function internalRemainingStock(session: ExhibitionSession, bookings: Booking[]) {
-  return Math.max(internalStock(session) - internalBookedCount(bookings, session.sessionId), 0);
+  return Math.max(session.totalStock - publicBookedCount(session, bookings), 0);
 }
 
 export function displaySessionStatus(session: ExhibitionSession, bookings?: Booking[], channel: "client" | "sales" | "total" = "total"): SessionStatus {
   if (session.status === "closed" || session.status === "ended" || session.status === "pending") {
     return session.status;
   }
+  if (channel === "sales") {
+    return "open";
+  }
   const remain =
     channel === "client" && bookings
       ? publicRemainingStock(session, bookings)
-      : channel === "sales" && bookings
-        ? Math.min(remainingStock(session), internalRemainingStock(session, bookings))
-        : remainingStock(session);
+      : remainingStock(session);
   if (remain <= 0) {
     return "full";
   }
@@ -85,7 +79,8 @@ export function canClientBookSession(session: ExhibitionSession, bookings: Booki
 }
 
 export function canSalesBookSession(session: ExhibitionSession, bookings: Booking[]) {
-  return canSelectSession(session, bookings, "sales") && remainingStock(session) > 0 && internalRemainingStock(session, bookings) > 0;
+  void bookings;
+  return session.status === "open";
 }
 
 export function hasActiveBookingForExhibition(
@@ -124,7 +119,7 @@ export function validateBooking(input: ValidationInput): string | null {
     return "当前活动限制每位会员只能预约一个场次";
   }
   if (channel === "sales") {
-    if (!canSalesBookSession(session, bookings)) return "内部销售库存不足，销售不可继续代约";
+    if (!canSalesBookSession(session, bookings)) return `该场次${statusText(displaySessionStatus(session))}，销售不可继续代约`;
   } else if (!canClientBookSession(session, bookings)) {
     return `该场次${statusText(displaySessionStatus(session, bookings, "client"))}，不可预约`;
   }
