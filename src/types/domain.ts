@@ -39,7 +39,7 @@ export type BookingRule = {
   cancelDeadlineHours: number;
 };
 
-export type SessionStatus = "pending" | "open" | "full" | "ended" | "closed";
+export type SessionStatus = "pending" | "open" | "full" | "ended";
 
 export type ExhibitionSession = {
   sessionId: string;
