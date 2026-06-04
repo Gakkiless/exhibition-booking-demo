@@ -245,7 +245,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     if (!booking) return;
     const matchedRule = state.rules.find((item) => item.exhibitionId === booking.exhibitionId);
     if (!matchedRule?.allowCancel) {
-      notify("当前活动不允许取消预约", "error");
+      notify("该活动不允许取消预约", "error");
       return;
     }
     if (booking.status !== "pending_checkin") {
@@ -409,7 +409,7 @@ function TopNav({
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
         <div>
           <div className="text-sm text-slate-500">Demo</div>
-          <h1 className="text-lg font-semibold text-slate-950">线下展览活动预约报名</h1>
+          <h1 className="text-lg font-semibold text-slate-950">线下活动预约报名</h1>
         </div>
         <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
           <button
@@ -757,9 +757,9 @@ function ClientBookingHome(props: {
           </div>
           <h2 className="text-2xl font-semibold leading-tight text-slate-950">{props.exhibition.title}</h2>
           <p className="mt-3 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
-          <InfoRow label="展览地点" value={props.exhibition.location} />
+          <InfoRow label="活动地点" value={props.exhibition.location} />
           <InfoRow
-            label="展览时间"
+            label="活动时间"
             value={formatRange(props.exhibition.exhibitionStartTime, props.exhibition.exhibitionEndTime)}
           />
           <InfoRow
@@ -857,7 +857,7 @@ function ClientBookingHome(props: {
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-2 text-sm font-semibold text-slate-950">活动详细介绍</div>
         <p className="text-sm leading-6 text-slate-600">
-          本展览采用分场次预约入场。会员完成预约后将在小程序内获得预约码和二维码占位凭证，现场由员工端扫描客人手机里的预约凭证完成签到。
+          本活动采用分场次预约入场。会员完成预约后将在小程序内获得预约码和二维码占位凭证，现场由员工端扫描客人手机里的预约凭证完成签到。
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
       </section>
@@ -1106,7 +1106,7 @@ function ConfirmBooking(props: {
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-3 text-sm font-semibold text-slate-950">预约内容</div>
-        <InfoRow label="展览" value={props.exhibition.title} />
+        <InfoRow label="活动" value={props.exhibition.title} />
         <InfoRow label="地点" value={props.exhibition.location} />
         <InfoRow label="场次" value={formatRange(props.session.startTime, props.session.endTime)} />
       </section>
@@ -1174,9 +1174,9 @@ function SuccessPage({
         </div>
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
-        <InfoRow label="展览名称" value={exhibition.title} />
+        <InfoRow label="活动名称" value={exhibition.title} />
         <InfoRow label="场次时间" value={formatRange(session.startTime, session.endTime)} />
-        <InfoRow label="展览地点" value={exhibition.location} />
+        <InfoRow label="活动地点" value={exhibition.location} />
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
         <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
@@ -1226,7 +1226,7 @@ function BookingVoucherModal({
         <div className="mt-1 text-sm text-slate-500">{bookingStatusText(booking.status)}</div>
         </div>
         <div className="mt-4 rounded-2xl border border-slate-100 p-4">
-        <InfoRow label="展览名称" value={exhibition.title} />
+        <InfoRow label="活动名称" value={exhibition.title} />
         <InfoRow label="场次时间" value={formatRange(session.startTime, session.endTime)} />
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
@@ -1366,18 +1366,6 @@ function AdminShell(props: {
             {label as string}
           </button>
         ))}
-        <div className="mt-5 px-2 text-xs font-semibold uppercase text-slate-400">当前活动</div>
-        <select
-          value={props.selectedExhibitionId}
-          onChange={(event) => props.setSelectedExhibitionId(event.target.value)}
-          className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
-        >
-          {props.state.exhibitions.map((item) => (
-            <option key={item.exhibitionId} value={item.exhibitionId}>
-              {item.title}
-            </option>
-          ))}
-        </select>
       </aside>
       <section className="min-w-0">
         {props.page === "dashboard" && (
@@ -1570,7 +1558,7 @@ function AssistedBookingPage(props: {
       return;
     }
     if (selectedExhibition.status !== "published") {
-      setMessage("当前活动未上架，销售不可代客预约");
+      setMessage("该活动未上架，销售不可代客预约");
       return;
     }
     if (!canSalesBookSession(selectedSession, props.bookings)) {
@@ -1578,7 +1566,7 @@ function AssistedBookingPage(props: {
       return;
     }
     if (activeBookingBlocked) {
-      setMessage("当前活动限制每位会员只能预约一个场次，该会员已有有效预约");
+      setMessage("该活动限制每位会员只能预约一个场次，该会员已有有效预约");
       return;
     }
     const missingFields = missingRequiredBookingFields(selectedExhibition, formValues);
@@ -1745,9 +1733,6 @@ function AssistedBookingPage(props: {
               <button onClick={submitAssistedBooking} className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
                 提交代客预约
               </button>
-              <button className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-400" disabled>
-                发送微信通知
-              </button>
             </div>
           </section>
         </div>
@@ -1769,8 +1754,8 @@ function ActivityList(props: {
         <thead>
           <tr>
             <Th>活动名称</Th>
-            <Th>展览地点</Th>
-            <Th>展览时间</Th>
+            <Th>活动地点</Th>
+            <Th>活动时间</Th>
             <Th>预约状态</Th>
             <Th>总预约人数</Th>
             <Th>操作</Th>
@@ -1823,13 +1808,13 @@ function ConfigPage(props: {
     <div className="grid gap-5 xl:grid-cols-2">
       <Panel title="活动配置">
         <div className="grid gap-3">
-          <TextInput label="展览名称" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} />
+          <TextInput label="活动名称" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} />
           <TextInput label="主图 URL" value={draft.coverImage} onChange={(coverImage) => setDraft({ ...draft, coverImage })} />
-          <TextArea label="展览简介" value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
-          <TextInput label="展览地点" value={draft.location} onChange={(location) => setDraft({ ...draft, location })} />
+          <TextArea label="活动简介" value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
+          <TextInput label="活动地点" value={draft.location} onChange={(location) => setDraft({ ...draft, location })} />
           <div className="grid gap-3 md:grid-cols-2">
-            <TextInput label="展览开始时间" value={draft.exhibitionStartTime} onChange={(exhibitionStartTime) => setDraft({ ...draft, exhibitionStartTime })} />
-            <TextInput label="展览结束时间" value={draft.exhibitionEndTime} onChange={(exhibitionEndTime) => setDraft({ ...draft, exhibitionEndTime })} />
+            <TextInput label="活动开始时间" value={draft.exhibitionStartTime} onChange={(exhibitionStartTime) => setDraft({ ...draft, exhibitionStartTime })} />
+            <TextInput label="活动结束时间" value={draft.exhibitionEndTime} onChange={(exhibitionEndTime) => setDraft({ ...draft, exhibitionEndTime })} />
             <TextInput label="预约开始时间" value={draft.bookingStartTime} onChange={(bookingStartTime) => setDraft({ ...draft, bookingStartTime })} />
             <TextInput label="预约结束时间" value={draft.bookingEndTime} onChange={(bookingEndTime) => setDraft({ ...draft, bookingEndTime })} />
           </div>
@@ -2200,15 +2185,14 @@ function BookingList(props: {
       <Table>
         <thead>
           <tr>
-            <Th>预约码</Th>
+            <Th>二维码</Th>
             <Th>会员信息</Th>
-            <Th>活动名称</Th>
             <Th>场次时间</Th>
             <Th>状态</Th>
             <Th>填写信息</Th>
             <Th>签到状态</Th>
             <Th>签到时间</Th>
-            <Th>预约时间</Th>
+            <Th>创建时间</Th>
             <Th>来源</Th>
             <Th>销售顾问</Th>
             <Th>操作</Th>
@@ -2220,12 +2204,20 @@ function BookingList(props: {
             const session = props.sessions.find((item) => item.sessionId === booking.sessionId)!;
             return (
               <tr key={booking.bookingId} className="border-t border-slate-100">
-                <Td className="font-mono">{booking.bookingCode}</Td>
+                <Td>
+                  <div className="flex w-20 flex-col items-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50">
+                      <QrCode size={28} className="text-slate-500" />
+                    </div>
+                    <div className="mt-1 max-w-20 truncate font-mono text-[10px] text-slate-400">
+                      {booking.bookingCode}
+                    </div>
+                  </div>
+                </Td>
                 <Td>
                   <div className="font-medium text-slate-950">{booking.memberName}</div>
                   <div className="text-xs text-slate-500">{booking.memberId} / {booking.memberPhone} / {booking.memberLevel}</div>
                 </Td>
-                <Td>{exhibition.title}</Td>
                 <Td>{formatRange(session.startTime, session.endTime)}</Td>
                 <Td>{bookingStatusText(booking.status)}</Td>
                 <Td>
