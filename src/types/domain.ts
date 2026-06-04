@@ -10,6 +10,9 @@ export type Exhibition = {
   exhibitionId: string;
   title: string;
   coverImage: string;
+  sharePosterImage: string;
+  sharePosterTitle: string;
+  sharePosterDesc: string;
   description: string;
   location: string;
   exhibitionStartTime: string;
@@ -17,7 +20,13 @@ export type Exhibition = {
   bookingStartTime: string;
   bookingEndTime: string;
   notice: string;
+  bookingFields: BookingField[];
   status: "draft" | "published" | "closed";
+};
+
+export type BookingField = {
+  fieldId: string;
+  label: string;
 };
 
 export type BookingRule = {
@@ -39,11 +48,12 @@ export type ExhibitionSession = {
   startTime: string;
   endTime: string;
   totalStock: number;
+  publicStock: number;
   bookedCount: number;
   status: SessionStatus;
 };
 
-export type BookingStatus = "pending_use" | "cancelled" | "checked_in" | "expired";
+export type BookingStatus = "pending_checkin" | "cancelled" | "checked_in" | "expired";
 
 export type Booking = {
   bookingId: string;
@@ -58,6 +68,7 @@ export type Booking = {
   status: BookingStatus;
   source: "小程序" | "后台" | "销售代客预约";
   createdAt: string;
+  formValues?: Record<string, string>;
   salesUserId?: string;
   salesUserName?: string;
   salesRole?: string;
