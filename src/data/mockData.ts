@@ -65,9 +65,9 @@ export const initialState: AppState = {
       notice:
         "请按预约场次提前 15 分钟到场。预约仅限会员本人使用，不可转让。入场需出示小程序预约凭证与会员身份信息。",
       bookingFields: [
-        { fieldId: "withChildren", label: "是否带儿童" },
-        { fieldId: "childrenCount", label: "儿童人数" },
-        { fieldId: "childrenAge", label: "儿童年龄" },
+        { fieldId: "withChildren", label: "是否带儿童", required: true },
+        { fieldId: "childrenCount", label: "儿童人数", required: false },
+        { fieldId: "childrenAge", label: "儿童年龄", required: false },
       ],
       status: "published",
     },
@@ -88,9 +88,9 @@ export const initialState: AppState = {
       bookingEndTime: "2026-08-17 18:00",
       notice: "请遵守现场动线指引。部分展区禁止闪光灯拍摄。",
       bookingFields: [
-        { fieldId: "withChildren", label: "是否带儿童" },
-        { fieldId: "childrenCount", label: "儿童人数" },
-        { fieldId: "childrenAge", label: "儿童年龄" },
+        { fieldId: "withChildren", label: "是否带儿童", required: true },
+        { fieldId: "childrenCount", label: "儿童人数", required: false },
+        { fieldId: "childrenAge", label: "儿童年龄", required: false },
       ],
       status: "draft",
     },
