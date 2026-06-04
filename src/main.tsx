@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
-  BarChart3,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -37,18 +36,23 @@ import type {
 } from "./types/domain";
 import {
   bookingStatusText,
-  canSelectSession,
+  canClientBookSession,
+  canSalesBookSession,
   createBookingCode,
   displaySessionStatus,
   formatRange,
   hasActiveBookingForExhibition,
+  internalBookedCount,
+  internalRemainingStock,
+  internalStock,
   nowText,
+  publicRemainingStock,
   remainingStock,
   statusText,
   validateBooking,
 } from "./utils/business";
 
-type ClientPage = "detail" | "center" | "confirm" | "success" | "my" | "scan";
+type ClientPage = "detail" | "center" | "confirm" | "success" | "my" | "scan" | "voucher";
 type AdminPage = "dashboard" | "activities" | "config" | "sessions" | "bookings" | "assist";
 type AdminRole = "operator" | "sales";
 
@@ -67,11 +71,13 @@ function App() {
   const [state, setState] = useState<AppState>(initialState);
   const [mode, setMode] = useState<"client" | "admin">("client");
   const [clientPage, setClientPage] = useState<ClientPage>("detail");
-  const [adminPage, setAdminPage] = useState<AdminPage>("dashboard");
+  const [adminPage, setAdminPage] = useState<AdminPage>("activities");
   const [adminRole, setAdminRole] = useState<AdminRole>("operator");
   const [selectedExhibitionId, setSelectedExhibitionId] = useState("EXH001");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [lastBookingId, setLastBookingId] = useState<string | null>(null);
+  const [voucherBookingId, setVoucherBookingId] = useState<string | null>(null);
+  const [sharePosterOpen, setSharePosterOpen] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
 
   const exhibition = state.exhibitions.find((item) => item.exhibitionId === selectedExhibitionId)!;
@@ -113,7 +119,7 @@ function App() {
       (booking) =>
         booking.exhibitionId === selectedExhibitionId &&
         booking.memberId === state.member.memberId &&
-        booking.status === "pending_use",
+        booking.status === "pending_checkin",
     );
     if (!activeBooking) {
       setClientPage("scan");
@@ -121,11 +127,18 @@ function App() {
       return;
     }
     // TODO API: 微信扫码现场二维码后，应由后端校验预约记录并写入签到时间、签到来源和现场二维码点位。
+    const signedAt = nowText();
     setState((current) => ({
       ...current,
       bookings: current.bookings.map((booking) =>
         booking.bookingId === activeBooking.bookingId && !booking.signedInAt
-          ? { ...booking, signedInAt: nowText(), signInSource: "现场二维码" }
+          ? {
+              ...booking,
+              status: "checked_in",
+              signedInAt: signedAt,
+              checkedInAt: signedAt,
+              signInSource: "现场二维码",
+            }
           : booking,
       ),
     }));
@@ -134,25 +147,17 @@ function App() {
     notify("现场签到成功", "success");
   }
 
-  async function shareActivity() {
-    const shareUrl = window.location.href;
-    const shareData = {
-      title: exhibition.title,
-      text: `${exhibition.title}，可在松赞小程序预约线下展览活动。`,
-      url: shareUrl,
-    };
-
+  async function copyShareLink() {
     try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-        notify("已唤起分享面板", "success");
-        return;
-      }
-      await navigator.clipboard.writeText(shareUrl);
+      await navigator.clipboard.writeText(window.location.href);
       notify("分享链接已复制", "success");
     } catch {
-      notify("分享已取消或暂不可用", "info");
+      notify("当前浏览器不支持复制，请手动复制地址栏链接", "info");
     }
+  }
+
+  function shareActivity() {
+    setSharePosterOpen(true);
   }
 
   function createBookingForMember(input: {
@@ -160,6 +165,7 @@ function App() {
     exhibitionId: string;
     sessionId: string;
     source: Booking["source"];
+    formValues?: Record<string, string>;
     salesUser?: SalesUser;
   }) {
     const targetExhibition = state.exhibitions.find((item) => item.exhibitionId === input.exhibitionId);
@@ -181,6 +187,7 @@ function App() {
       session: targetSession,
       bookings: state.bookings,
       noticeAccepted: true,
+      channel: input.source === "销售代客预约" ? "sales" : "client",
     });
     if (error) {
       notify(error, "error");
@@ -198,9 +205,10 @@ function App() {
       memberPhone: input.member.phone,
       memberLevel: input.member.level,
       bookingCount: 1,
-      status: "pending_use",
+      status: "pending_checkin",
       source: input.source,
       createdAt,
+      formValues: input.formValues,
       salesUserId: input.salesUser?.salesUserId,
       salesUserName: input.salesUser?.salesUserName,
       salesRole: input.salesUser?.salesRole,
@@ -220,7 +228,7 @@ function App() {
     return booking;
   }
 
-  function submitBooking(noticeAccepted: boolean) {
+  function submitBooking(noticeAccepted: boolean, formValues: Record<string, string>) {
     if (!selectedSession) return;
     if (!noticeAccepted) {
       notify("请先勾选并确认预约须知", "error");
@@ -232,6 +240,7 @@ function App() {
       exhibitionId: exhibition.exhibitionId,
       sessionId: selectedSession.sessionId,
       source: "小程序",
+      formValues,
     });
     if (!booking) return;
     setClientPage("success");
@@ -246,8 +255,8 @@ function App() {
       notify("当前活动不允许取消预约", "error");
       return;
     }
-    if (booking.status !== "pending_use") {
-      notify("只有待使用预约可以取消", "error");
+    if (booking.status !== "pending_checkin") {
+      notify("只有待签到预约可以取消", "error");
       return;
     }
     // TODO API: 调用取消预约接口，由后端释放库存并返回最新场次库存。
@@ -266,16 +275,17 @@ function App() {
   }
 
   function checkInBooking(bookingId: string) {
-    // TODO API: 调用核销接口，真实场景需校验预约码、场次时间和核销权限。
+    // TODO API: 调用签到接口，真实场景需校验预约码、场次时间和后台操作权限。
+    const signedAt = nowText();
     setState((current) => ({
       ...current,
       bookings: current.bookings.map((booking) =>
-        booking.bookingId === bookingId && booking.status === "pending_use"
-          ? { ...booking, status: "checked_in", checkedInAt: nowText() }
+        booking.bookingId === bookingId && booking.status === "pending_checkin"
+          ? { ...booking, status: "checked_in", checkedInAt: signedAt, signedInAt: signedAt }
           : booking,
       ),
     }));
-    notify("已模拟核销该预约", "success");
+    notify("已模拟签到该预约", "success");
   }
 
   function updateExhibition(next: Exhibition) {
@@ -315,6 +325,7 @@ function App() {
       startTime: "2026-06-25 14:00",
       endTime: "2026-06-25 16:00",
       totalStock: 30,
+      publicStock: 24,
       bookedCount: 0,
       status: "open",
     };
@@ -322,12 +333,13 @@ function App() {
     notify("已新增场次", "success");
   }
 
-  function assistBooking(member: Member, exhibitionId: string, sessionId: string) {
+  function assistBooking(member: Member, exhibitionId: string, sessionId: string, formValues: Record<string, string>) {
     const booking = createBookingForMember({
       member,
       exhibitionId,
       sessionId,
       source: "销售代客预约",
+      formValues,
       salesUser: activeSalesUser,
     });
     if (!booking) return false;
@@ -347,6 +359,7 @@ function App() {
             sessions={sessions}
             selectedSession={selectedSession}
             lastBooking={lastBooking}
+            voucherBookingId={voucherBookingId}
             page={clientPage}
             setPage={setClientPage}
             login={login}
@@ -357,7 +370,7 @@ function App() {
                 return;
               }
               const session = state.sessions.find((item) => item.sessionId === sessionId);
-              if (!session || !canSelectSession(session)) {
+              if (!session || !canClientBookSession(session, state.bookings)) {
                 notify("该场次当前不可预约", "error");
                 return;
               }
@@ -368,6 +381,10 @@ function App() {
             cancelBooking={cancelBooking}
             scanSignIn={scanSignIn}
             shareActivity={shareActivity}
+            openVoucher={(bookingId) => {
+              setVoucherBookingId(bookingId);
+              setClientPage("voucher");
+            }}
           />
         ) : (
           <AdminShell
@@ -389,6 +406,13 @@ function App() {
           />
         )}
       </main>
+      {sharePosterOpen && (
+        <SharePosterSheet
+          exhibition={exhibition}
+          onClose={() => setSharePosterOpen(false)}
+          copyShareLink={copyShareLink}
+        />
+      )}
       {toast && <ToastView toast={toast} />}
     </div>
   );
@@ -434,15 +458,17 @@ function ClientShell(props: {
   sessions: ExhibitionSession[];
   selectedSession: ExhibitionSession | null;
   lastBooking: Booking | null;
+  voucherBookingId: string | null;
   page: ClientPage;
   setPage: (page: ClientPage) => void;
   login: () => void;
   logout: () => void;
   selectSession: (sessionId: string) => void;
-  submitBooking: (noticeAccepted: boolean) => void;
+  submitBooking: (noticeAccepted: boolean, formValues: Record<string, string>) => void;
   cancelBooking: (bookingId: string) => void;
   scanSignIn: () => void;
   shareActivity: () => void;
+  openVoucher: (bookingId: string) => void;
 }) {
   const myBookings = props.state.bookings.filter(
     (booking) => booking.memberId === props.state.member.memberId,
@@ -460,6 +486,7 @@ function ClientShell(props: {
             exhibition={props.exhibition}
             rule={props.rule}
             sessions={props.sessions}
+            bookings={props.state.bookings}
             login={props.login}
             logout={props.logout}
             selectSession={props.selectSession}
@@ -473,6 +500,9 @@ function ClientShell(props: {
             login={props.login}
             logout={props.logout}
             setPage={props.setPage}
+            exhibitions={props.state.exhibitions}
+            sessions={props.state.sessions}
+            openVoucher={props.openVoucher}
           />
         )}
         {props.page === "confirm" && props.selectedSession && (
@@ -480,7 +510,6 @@ function ClientShell(props: {
             member={props.state.member}
             exhibition={props.exhibition}
             session={props.selectedSession}
-            notice={props.exhibition.notice}
             submitBooking={props.submitBooking}
           />
         )}
@@ -498,6 +527,14 @@ function ClientShell(props: {
             exhibitions={props.state.exhibitions}
             sessions={props.state.sessions}
             cancelBooking={props.cancelBooking}
+          />
+        )}
+        {props.page === "voucher" && props.voucherBookingId && (
+          <BookingVoucherPage
+            booking={props.state.bookings.find((booking) => booking.bookingId === props.voucherBookingId) ?? null}
+            exhibitions={props.state.exhibitions}
+            sessions={props.state.sessions}
+            setPage={props.setPage}
           />
         )}
         {props.page === "scan" && (
@@ -538,13 +575,70 @@ function ClientBottomTabs({ page, setPage }: { page: ClientPage; setPage: (page:
   );
 }
 
+function SharePosterSheet({
+  exhibition,
+  onClose,
+  copyShareLink,
+}: {
+  exhibition: Exhibition;
+  onClose: () => void;
+  copyShareLink: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 px-4 pb-4">
+      <section className="w-full max-w-[398px] rounded-3xl bg-white p-4 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm font-semibold text-slate-950">小程序分享海报</div>
+          <button onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="overflow-hidden rounded-2xl bg-slate-950 text-white">
+          <img src={exhibition.sharePosterImage} alt={exhibition.sharePosterTitle} className="h-56 w-full object-cover" />
+          <div className="p-4">
+            <div className="text-xl font-semibold">{exhibition.sharePosterTitle}</div>
+            <p className="mt-2 text-sm leading-6 text-slate-300">{exhibition.sharePosterDesc}</p>
+            <div className="mt-4 flex items-center gap-3 rounded-2xl bg-white p-3 text-slate-950">
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border-2 border-dashed border-slate-300">
+                <QrCode size={44} className="text-slate-500" />
+              </div>
+              <div className="text-sm">
+                <div className="font-semibold">扫码查看活动</div>
+                <div className="mt-1 text-xs leading-5 text-slate-500">二维码为 Demo 占位，真实项目接小程序码接口。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button onClick={copyShareLink} className="mt-4 h-11 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
+          复制活动链接
+        </button>
+      </section>
+    </div>
+  );
+}
+
 function MiniProgramCenter(props: {
   member: AppState["member"];
   bookings: Booking[];
+  exhibitions: Exhibition[];
+  sessions: ExhibitionSession[];
   login: () => void;
   logout: () => void;
   setPage: (page: ClientPage) => void;
+  openVoucher: (bookingId: string) => void;
 }) {
+  const demoToday = "2026-06-04";
+  const todayBooking = props.bookings.find((booking) => {
+    const session = props.sessions.find((item) => item.sessionId === booking.sessionId);
+    return (booking.status === "pending_checkin" || booking.status === "checked_in") && session?.startTime.startsWith(demoToday);
+  });
+  const todayExhibition = todayBooking
+    ? props.exhibitions.find((item) => item.exhibitionId === todayBooking.exhibitionId)
+    : null;
+  const todaySession = todayBooking
+    ? props.sessions.find((item) => item.sessionId === todayBooking.sessionId)
+    : null;
+
   return (
     <div className="space-y-4 p-4">
       <section className="rounded-2xl bg-slate-950 p-5 text-white shadow-sm">
@@ -565,6 +659,26 @@ function MiniProgramCenter(props: {
           {props.member.isLoggedIn ? "退出登录" : "模拟登录"}
         </button>
       </section>
+
+      {todayBooking && todayExhibition && todaySession && (
+        <section className="rounded-2xl bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-950">今日活动凭证</div>
+              <div className="mt-1 text-xs text-slate-500">{formatRange(todaySession.startTime, todaySession.endTime)}</div>
+            </div>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">待签到</span>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{todayExhibition.title}</div>
+          <button
+            onClick={() => props.openVoucher(todayBooking.bookingId)}
+            className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white"
+          >
+            <QrCode size={16} />
+            查看预约凭证二维码
+          </button>
+        </section>
+      )}
 
       <section className="rounded-2xl bg-white p-2 shadow-sm">
         <CenterMenuItem
@@ -629,7 +743,7 @@ function ScanSignInPage(props: {
   setPage: (page: ClientPage) => void;
   scanSignIn: () => void;
 }) {
-  const latestActive = props.bookings.find((booking) => booking.status === "pending_use");
+  const latestActive = props.bookings.find((booking) => booking.status === "pending_checkin");
   const latestSigned = props.bookings.find((booking) => Boolean(booking.signedInAt));
   const targetBooking = latestSigned ?? latestActive;
   const exhibition = targetBooking
@@ -647,7 +761,7 @@ function ScanSignInPage(props: {
         </div>
         <h2 className="mt-4 text-xl font-semibold text-slate-950">现场二维码签到</h2>
         <p className="mt-2 text-sm leading-6 text-slate-500">
-          模拟客人到场后使用微信扫描现场二维码。系统会校验当前会员是否存在待使用预约，只有预约过活动的会员才能签到。
+          模拟客人到场后使用微信扫描现场二维码。系统会校验当前会员是否存在待签到预约，只有预约过活动的会员才能签到。
         </p>
       </section>
 
@@ -707,6 +821,7 @@ function ClientBookingHome(props: {
   exhibition: Exhibition;
   rule: BookingRule;
   sessions: ExhibitionSession[];
+  bookings: Booking[];
   login: () => void;
   logout: () => void;
   selectSession: (sessionId: string) => void;
@@ -779,6 +894,7 @@ function ClientBookingHome(props: {
               date={date}
               active={selectedDate === date}
               sessions={props.sessions.filter((session) => datePart(session.startTime) === date)}
+              bookings={props.bookings}
               onClick={() => setSelectedDate(date)}
             />
           ))}
@@ -788,6 +904,7 @@ function ClientBookingHome(props: {
             dates={bookingDates}
             selectedDate={selectedDate}
             sessions={props.sessions}
+            bookings={props.bookings}
             onClose={() => setCalendarOpen(false)}
             onSelect={(date) => {
               setSelectedDate(date);
@@ -807,7 +924,7 @@ function ClientBookingHome(props: {
         ) : (
           <div className="space-y-3">
             {selectedSessions.map((session) => (
-              <SessionCard key={session.sessionId} session={session} selectSession={props.selectSession} />
+              <SessionCard key={session.sessionId} session={session} bookings={props.bookings} selectSession={props.selectSession} />
             ))}
           </div>
         )}
@@ -845,7 +962,7 @@ function ClientBookingHome(props: {
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-2 text-sm font-semibold text-slate-950">活动详细介绍</div>
         <p className="text-sm leading-6 text-slate-600">
-          本展览采用分场次预约入场。会员完成预约后将在小程序内获得预约码和二维码占位凭证，现场可由工作人员通过后台模拟核销。
+          本展览采用分场次预约入场。会员完成预约后将在小程序内获得预约码和二维码占位凭证，现场可扫码签到或由工作人员通过后台模拟签到。
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
       </section>
@@ -898,13 +1015,16 @@ function ClientBookingHome(props: {
 
 function SessionCard({
   session,
+  bookings,
   selectSession,
 }: {
   session: ExhibitionSession;
+  bookings: Booking[];
   selectSession: (sessionId: string) => void;
 }) {
-  const displayStatus = displaySessionStatus(session);
-  const disabled = !canSelectSession(session);
+  const displayStatus = displaySessionStatus(session, bookings, "client");
+  const disabled = !canClientBookSession(session, bookings);
+  const remain = publicRemainingStock(session, bookings);
   return (
     <button
       disabled={disabled}
@@ -919,9 +1039,10 @@ function SessionCard({
         <StatusPill status={displayStatus} />
       </div>
       <div className="mt-4 grid grid-cols-3 rounded-xl bg-slate-50 p-3 text-center text-xs">
-        <MetricMini label="总库存" value={session.totalStock} />
-        <MetricMini label="已预约" value={session.bookedCount} />
-        <MetricMini label="剩余" value={remainingStock(session)} />
+        <div className="col-span-3">
+          <div className="text-2xl font-semibold text-slate-950">{remain}</div>
+          <div className="mt-1 text-slate-500">剩余名额</div>
+        </div>
       </div>
     </button>
   );
@@ -931,15 +1052,17 @@ function DateChip({
   date,
   active,
   sessions,
+  bookings,
   onClick,
 }: {
   date: string;
   active: boolean;
   sessions: ExhibitionSession[];
+  bookings: Booking[];
   onClick: () => void;
 }) {
-  const openCount = sessions.filter((session) => canSelectSession(session)).length;
-  const remain = sessions.reduce((sum, session) => sum + remainingStock(session), 0);
+  const openCount = sessions.filter((session) => canClientBookSession(session, bookings)).length;
+  const remain = sessions.reduce((sum, session) => sum + publicRemainingStock(session, bookings), 0);
   return (
     <button
       onClick={onClick}
@@ -956,12 +1079,14 @@ function CalendarSheet({
   dates,
   selectedDate,
   sessions,
+  bookings,
   onSelect,
   onClose,
 }: {
   dates: string[];
   selectedDate: string;
   sessions: ExhibitionSession[];
+  bookings: Booking[];
   onSelect: (date: string) => void;
   onClose: () => void;
 }) {
@@ -991,7 +1116,7 @@ function CalendarSheet({
             if (!day) return <div key={`empty-${index}`} className="h-12" />;
             const enabled = dateSet.has(day);
             const daySessions = sessions.filter((session) => datePart(session.startTime) === day);
-            const remain = daySessions.reduce((sum, session) => sum + remainingStock(session), 0);
+            const remain = daySessions.reduce((sum, session) => sum + publicRemainingStock(session, bookings), 0);
             return (
               <button
                 key={day}
@@ -1047,10 +1172,20 @@ function ConfirmBooking(props: {
   member: AppState["member"];
   exhibition: Exhibition;
   session: ExhibitionSession;
-  notice: string;
-  submitBooking: (noticeAccepted: boolean) => void;
+  submitBooking: (noticeAccepted: boolean, formValues: Record<string, string>) => void;
 }) {
   const [accepted, setAccepted] = useState(false);
+  const [formValues, setFormValues] = useState<Record<string, string>>(
+    Object.fromEntries(props.exhibition.bookingFields.map((field) => [field.fieldId, ""])),
+  );
+
+  React.useEffect(() => {
+    setFormValues((current) => ({
+      ...Object.fromEntries(props.exhibition.bookingFields.map((field) => [field.fieldId, ""])),
+      ...current,
+    }));
+  }, [props.exhibition.bookingFields]);
+
   return (
     <div className="space-y-4 p-4">
       <h2 className="text-lg font-semibold text-slate-950">确认预约</h2>
@@ -1070,6 +1205,22 @@ function ConfirmBooking(props: {
         <InfoRow label="地点" value={props.exhibition.location} />
         <InfoRow label="场次" value={formatRange(props.session.startTime, props.session.endTime)} />
       </section>
+      <section className="rounded-2xl bg-white p-4 shadow-sm">
+        <div className="mb-3 text-sm font-semibold text-slate-950">客人补充信息</div>
+        <div className="space-y-3">
+          {props.exhibition.bookingFields.map((field) => (
+            <label key={field.fieldId} className="block text-sm">
+              <span className="mb-1 block text-slate-500">{field.label}</span>
+              <input
+                value={formValues[field.fieldId] ?? ""}
+                onChange={(event) => setFormValues({ ...formValues, [field.fieldId]: event.target.value })}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+                placeholder={`请输入${field.label}`}
+              />
+            </label>
+          ))}
+        </div>
+      </section>
       <label className="flex items-start gap-3 rounded-2xl bg-white p-4 text-sm text-slate-700 shadow-sm">
         <input
           type="checkbox"
@@ -1077,10 +1228,10 @@ function ConfirmBooking(props: {
           checked={accepted}
           onChange={(event) => setAccepted(event.target.checked)}
         />
-        <span>我已阅读并同意预约须知：{props.notice}</span>
+        <span>我已阅读并同意预约须知：{props.exhibition.notice}</span>
       </label>
       <button
-        onClick={() => props.submitBooking(accepted)}
+        onClick={() => props.submitBooking(accepted, formValues)}
         className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
       >
         提交预约
@@ -1120,7 +1271,7 @@ function SuccessPage({
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
         <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
-          入场须知：预约码仅限会员本人使用，请按场次到场。二维码为 Demo 占位，后续可接入真实凭证生成与核销接口。
+          入场须知：预约码仅限会员本人使用，请按场次到场。二维码为 Demo 占位，后续可接入真实凭证生成与签到接口。
         </p>
       </section>
       <button
@@ -1128,6 +1279,52 @@ function SuccessPage({
         className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
       >
         查看我的预约
+      </button>
+    </div>
+  );
+}
+
+function BookingVoucherPage({
+  booking,
+  exhibitions,
+  sessions,
+  setPage,
+}: {
+  booking: Booking | null;
+  exhibitions: Exhibition[];
+  sessions: ExhibitionSession[];
+  setPage: (page: ClientPage) => void;
+}) {
+  if (!booking) {
+    return (
+      <div className="p-4">
+        <section className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+          未找到预约凭证
+        </section>
+      </div>
+    );
+  }
+  const exhibition = exhibitions.find((item) => item.exhibitionId === booking.exhibitionId);
+  const session = sessions.find((item) => item.sessionId === booking.sessionId);
+  return (
+    <div className="space-y-4 p-4">
+      <section className="rounded-2xl bg-white p-5 text-center shadow-sm">
+        <div className="mx-auto flex h-36 w-36 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
+          <QrCode size={78} className="text-slate-400" />
+        </div>
+        <div className="mt-3 font-mono text-lg font-semibold tracking-wide text-slate-950">
+          {booking.bookingCode}
+        </div>
+        <div className="mt-1 text-sm text-slate-500">{bookingStatusText(booking.status)}</div>
+      </section>
+      <section className="rounded-2xl bg-white p-4 shadow-sm">
+        <InfoRow label="展览名称" value={exhibition?.title ?? "-"} />
+        <InfoRow label="场次时间" value={session ? formatRange(session.startTime, session.endTime) : "-"} />
+        <InfoRow label="会员姓名" value={booking.memberName} />
+        <InfoRow label="手机号" value={booking.memberPhone} />
+      </section>
+      <button onClick={() => setPage("center")} className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
+        返回个人中心
       </button>
     </div>
   );
@@ -1173,7 +1370,7 @@ function MyBookings(props: {
                 查看详情
               </button>
               <button
-                disabled={booking.status !== "pending_use"}
+                disabled={booking.status !== "pending_checkin"}
                 onClick={() => props.cancelBooking(booking.bookingId)}
                 className="flex-1 rounded-xl bg-slate-950 py-2 text-sm font-medium text-white disabled:bg-slate-200 disabled:text-slate-500"
               >
@@ -1202,7 +1399,7 @@ function AdminShell(props: {
   addSession: () => void;
   cancelBooking: (bookingId: string) => void;
   checkInBooking: (bookingId: string) => void;
-  assistBooking: (member: Member, exhibitionId: string, sessionId: string) => boolean;
+  assistBooking: (member: Member, exhibitionId: string, sessionId: string, formValues: Record<string, string>) => boolean;
 }) {
   const selectedExhibition = props.state.exhibitions.find(
     (item) => item.exhibitionId === props.selectedExhibitionId,
@@ -1232,7 +1429,7 @@ function AdminShell(props: {
                 const nextRole = role as AdminRole;
                 props.setAdminRole(nextRole);
                 if (nextRole === "operator" && props.page === "assist") {
-                  props.setPage("dashboard");
+                  props.setPage("activities");
                 }
               }}
               className={`w-1/2 rounded-md px-3 py-2 text-sm font-medium ${props.adminRole === role ? "bg-slate-950 text-white" : "text-slate-600"}`}
@@ -1242,7 +1439,6 @@ function AdminShell(props: {
           ))}
         </div>
         {[
-          ["dashboard", "数据看板", BarChart3],
           ["activities", "活动列表", ClipboardList],
           ["config", "活动配置", Settings],
           ["sessions", "场次管理", CalendarDays],
@@ -1273,7 +1469,7 @@ function AdminShell(props: {
       </aside>
       <section className="min-w-0">
         {props.page === "dashboard" && (
-          <Dashboard sessions={selectedSessions} bookings={selectedBookings} />
+          <Dashboard exhibition={selectedExhibition} sessions={selectedSessions} bookings={selectedBookings} />
         )}
         {props.page === "activities" && (
           <ActivityList
@@ -1320,32 +1516,49 @@ function AdminShell(props: {
   );
 }
 
-function Dashboard({ sessions, bookings }: { sessions: ExhibitionSession[]; bookings: Booking[] }) {
+function Dashboard({
+  exhibition,
+  sessions,
+  bookings,
+}: {
+  exhibition: Exhibition;
+  sessions: ExhibitionSession[];
+  bookings: Booking[];
+}) {
   const stats = useMemo(() => {
     const totalStock = sessions.reduce((sum, item) => sum + item.totalStock, 0);
+    const publicStock = sessions.reduce((sum, item) => sum + item.publicStock, 0);
+    const internal = sessions.reduce((sum, item) => sum + internalStock(item), 0);
     const booked = sessions.reduce((sum, item) => sum + item.bookedCount, 0);
     return {
       totalStock,
+      publicStock,
+      internal,
       booked,
       remain: totalStock - booked,
       assisted: bookings.filter((item) => item.source === "销售代客预约").length,
       signed: bookings.filter((item) => Boolean(item.signedInAt)).length,
-      checked: bookings.filter((item) => item.status === "checked_in").length,
       cancelled: bookings.filter((item) => item.status === "cancelled").length,
     };
   }, [sessions, bookings]);
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-7">
-        <AdminMetric label="总库存" value={stats.totalStock} />
+      <Panel
+        title={`${exhibition.title} · 数据看板`}
+        action={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">按单个活动统计</span>}
+      >
+        <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
+        <AdminMetric label="实际库存" value={stats.totalStock} />
+        <AdminMetric label="对外库存" value={stats.publicStock} />
+        <AdminMetric label="内部库存" value={stats.internal} />
         <AdminMetric label="已预约人数" value={stats.booked} />
         <AdminMetric label="剩余库存" value={stats.remain} />
-        <AdminMetric label="销售代约人数" value={stats.assisted} />
+        <AdminMetric label="内部代预约人数" value={stats.assisted} />
         <AdminMetric label="签到人数" value={stats.signed} />
-        <AdminMetric label="核销人数" value={stats.checked} />
         <AdminMetric label="取消人数" value={stats.cancelled} />
-      </div>
+        </div>
+      </Panel>
       <Panel title="各场次预约情况">
         <div className="space-y-4">
           {sessions.map((session) => {
@@ -1353,12 +1566,13 @@ function Dashboard({ sessions, bookings }: { sessions: ExhibitionSession[]; book
             const signed = bookings.filter(
               (booking) => booking.sessionId === session.sessionId && Boolean(booking.signedInAt),
             ).length;
+            const assisted = internalBookedCount(bookings, session.sessionId);
             return (
               <div key={session.sessionId}>
                 <div className="mb-2 flex items-center justify-between text-sm">
                   <span className="font-medium text-slate-700">{session.sessionName}</span>
                   <span className="text-slate-500">
-                    预约 {session.bookedCount}/{session.totalStock} · 签到 {signed}
+                    预约 {session.bookedCount}/{session.totalStock} · 对外 {session.publicStock} · 内部代约 {assisted} · 签到 {signed}
                   </span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -1380,7 +1594,7 @@ function AssistedBookingPage(props: {
   sessions: ExhibitionSession[];
   bookings: Booking[];
   salesUser: SalesUser;
-  assistBooking: (member: Member, exhibitionId: string, sessionId: string) => boolean;
+  assistBooking: (member: Member, exhibitionId: string, sessionId: string, formValues: Record<string, string>) => boolean;
 }) {
   const firstPublished = props.exhibitions.find((item) => item.status === "published") ?? props.exhibitions[0];
   const [query, setQuery] = useState("");
@@ -1388,6 +1602,7 @@ function AssistedBookingPage(props: {
   const [selectedExhibitionId, setSelectedExhibitionId] = useState(firstPublished?.exhibitionId ?? "");
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
 
   const selectedMember = props.members.find((member) => member.memberId === selectedMemberId) ?? null;
@@ -1424,6 +1639,10 @@ function AssistedBookingPage(props: {
     setMessage("");
   }, [selectedExhibitionId, selectedDate, selectedMemberId]);
 
+  React.useEffect(() => {
+    setFormValues(Object.fromEntries((selectedExhibition?.bookingFields ?? []).map((field) => [field.fieldId, ""])));
+  }, [selectedExhibitionId, selectedExhibition?.bookingFields]);
+
   function submitAssistedBooking() {
     setMessage("");
     if (!selectedMember) {
@@ -1442,15 +1661,15 @@ function AssistedBookingPage(props: {
       setMessage("当前活动未上架，销售不可代客预约");
       return;
     }
-    if (!canSelectSession(selectedSession)) {
-      setMessage(`该场次${statusText(displaySessionStatus(selectedSession))}，不可预约`);
+    if (!canSalesBookSession(selectedSession, props.bookings)) {
+      setMessage(`该场次${statusText(displaySessionStatus(selectedSession, props.bookings, "sales"))}，内部库存不可预约`);
       return;
     }
     if (activeBookingBlocked) {
       setMessage("当前活动限制每位会员只能预约一个场次，该会员已有有效预约");
       return;
     }
-    const ok = props.assistBooking(selectedMember, selectedExhibition.exhibitionId, selectedSession.sessionId);
+    const ok = props.assistBooking(selectedMember, selectedExhibition.exhibitionId, selectedSession.sessionId, formValues);
     if (ok) {
       setMessage(`代客预约成功：${selectedMember.name} · ${selectedSession.sessionName}`);
       setSelectedSessionId("");
@@ -1547,8 +1766,8 @@ function AssistedBookingPage(props: {
               <div className="mb-3 text-sm font-semibold text-slate-950">选择场次</div>
               <div className="grid gap-3 md:grid-cols-2">
                 {selectedSessions.map((session) => {
-                  const displayStatus = displaySessionStatus(session);
-                  const disabled = !canSelectSession(session);
+                  const displayStatus = displaySessionStatus(session, props.bookings, "sales");
+                  const disabled = !canSalesBookSession(session, props.bookings);
                   return (
                     <button
                       key={session.sessionId}
@@ -1566,7 +1785,7 @@ function AssistedBookingPage(props: {
                         <span className="rounded-full bg-white/20 px-2 py-1 text-xs">{statusText(displayStatus)}</span>
                       </div>
                       <div className="mt-3 text-xs opacity-75">
-                        总 {session.totalStock} / 已约 {session.bookedCount} / 剩余 {remainingStock(session)}
+                        内部剩余 {Math.min(remainingStock(session), internalRemainingStock(session, props.bookings))} / 内部库存 {internalStock(session)}
                       </div>
                     </button>
                   );
@@ -1574,8 +1793,27 @@ function AssistedBookingPage(props: {
               </div>
             </div>
 
+            {selectedExhibition && (
+              <div className="rounded-xl border border-slate-200 p-4">
+                <div className="mb-3 text-sm font-semibold text-slate-950">客人补充信息</div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {selectedExhibition.bookingFields.map((field) => (
+                    <label key={field.fieldId} className="block text-sm">
+                      <span className="mb-1 block font-medium text-slate-700">{field.label}</span>
+                      <input
+                        value={formValues[field.fieldId] ?? ""}
+                        onChange={(event) => setFormValues({ ...formValues, [field.fieldId]: event.target.value })}
+                        placeholder={`请输入${field.label}`}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-              规则提示：销售代客预约仅可选择现有会员，仍遵守活动上架、库存、场次状态和每会员限约一场规则。
+              规则提示：销售代客预约仅可选择现有会员，不占用 C 端对外展示库存，但仍不能超过实际库存和内部销售库存，并遵守活动上架、场次状态和每会员限约一场规则。
               {activeBookingBlocked && (
                 <div className="mt-2 font-semibold text-rose-700">该会员已有有效预约，当前规则禁止再次预约。</div>
               )}
@@ -1632,6 +1870,7 @@ function ActivityList(props: {
                 <Td>
                   <div className="flex flex-wrap gap-2">
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("config"); }}>编辑</AdminAction>
+                    <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("dashboard"); }}>查看数据</AdminAction>
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("sessions"); }}>查看场次</AdminAction>
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("bookings"); }}>报名名单</AdminAction>
                   </div>
@@ -1674,6 +1913,77 @@ function ConfigPage(props: {
             <TextInput label="预约结束时间" value={draft.bookingEndTime} onChange={(bookingEndTime) => setDraft({ ...draft, bookingEndTime })} />
           </div>
           <TextArea label="预约须知" value={draft.notice} onChange={(notice) => setDraft({ ...draft, notice })} />
+          <div className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-3 text-sm font-semibold text-slate-950">小程序分享海报配置</div>
+            <div className="grid gap-3">
+              <TextInput
+                label="分享海报图 URL"
+                value={draft.sharePosterImage}
+                onChange={(sharePosterImage) => setDraft({ ...draft, sharePosterImage })}
+              />
+              <TextInput
+                label="分享海报标题"
+                value={draft.sharePosterTitle}
+                onChange={(sharePosterTitle) => setDraft({ ...draft, sharePosterTitle })}
+              />
+              <TextArea
+                label="分享海报描述"
+                value={draft.sharePosterDesc}
+                onChange={(sharePosterDesc) => setDraft({ ...draft, sharePosterDesc })}
+              />
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-950">客人填写信息配置</div>
+                <div className="mt-1 text-xs text-slate-500">全部字段在 C 端和销售代约页展示为文本输入框</div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setDraft({
+                    ...draft,
+                    bookingFields: [
+                      ...draft.bookingFields,
+                      { fieldId: `custom_${Date.now()}`, label: "新增字段" },
+                    ],
+                  })
+                }
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700"
+              >
+                新增字段
+              </button>
+            </div>
+            <div className="space-y-2">
+              {draft.bookingFields.map((field, index) => (
+                <div key={field.fieldId} className="flex gap-2">
+                  <input
+                    value={field.label}
+                    onChange={(event) => {
+                      const nextFields = draft.bookingFields.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, label: event.target.value } : item,
+                      );
+                      setDraft({ ...draft, bookingFields: nextFields });
+                    }}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-950"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        bookingFields: draft.bookingFields.filter((item) => item.fieldId !== field.fieldId),
+                      })
+                    }
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-rose-600"
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
           <label className="flex items-center justify-between rounded-lg border border-slate-200 p-3 text-sm">
             <span className="font-medium text-slate-700">是否上架</span>
             <input
@@ -1726,7 +2036,9 @@ function AdminSessions({
             <Th>场次名称</Th>
             <Th>日期</Th>
             <Th>时间</Th>
-            <Th>总库存</Th>
+            <Th>实际库存</Th>
+            <Th>对外库存</Th>
+            <Th>内部库存</Th>
             <Th>已预约</Th>
             <Th>剩余</Th>
             <Th>状态</Th>
@@ -1764,6 +2076,8 @@ function SessionRow({
         </div>
       </Td>
       <Td><InlineInput type="number" value={String(draft.totalStock)} onChange={(value) => setDraft({ ...draft, totalStock: Number(value) || 0 })} /></Td>
+      <Td><InlineInput type="number" value={String(draft.publicStock)} onChange={(value) => setDraft({ ...draft, publicStock: Number(value) || 0 })} /></Td>
+      <Td>{internalStock(draft)}</Td>
       <Td>{draft.bookedCount}</Td>
       <Td>{remainingStock(draft)}</Td>
       <Td>
@@ -1780,7 +2094,17 @@ function SessionRow({
       </Td>
       <Td>
         <div className="flex gap-2">
-          <AdminAction onClick={() => updateSession(draft)}>保存</AdminAction>
+          <AdminAction
+            onClick={() =>
+              updateSession({
+                ...draft,
+                publicStock: Math.min(draft.publicStock, draft.totalStock),
+                bookedCount: Math.min(draft.bookedCount, draft.totalStock),
+              })
+            }
+          >
+            保存
+          </AdminAction>
           <AdminAction onClick={() => updateSession({ ...draft, status: "closed" })}>关闭场次</AdminAction>
         </div>
       </Td>
@@ -1803,9 +2127,9 @@ function BookingList(props: {
       action={
         <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | BookingStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
           <option value="all">全部状态</option>
-          <option value="pending_use">待使用</option>
+          <option value="pending_checkin">待签到</option>
           <option value="cancelled">已取消</option>
-          <option value="checked_in">已核销</option>
+          <option value="checked_in">已签到</option>
           <option value="expired">已过期</option>
         </select>
       }
@@ -1818,6 +2142,7 @@ function BookingList(props: {
             <Th>活动名称</Th>
             <Th>场次时间</Th>
             <Th>状态</Th>
+            <Th>填写信息</Th>
             <Th>签到状态</Th>
             <Th>签到时间</Th>
             <Th>预约时间</Th>
@@ -1840,6 +2165,26 @@ function BookingList(props: {
                 <Td>{exhibition.title}</Td>
                 <Td>{formatRange(session.startTime, session.endTime)}</Td>
                 <Td>{bookingStatusText(booking.status)}</Td>
+                <Td>
+                  {booking.formValues && Object.values(booking.formValues).some(Boolean) ? (
+                    <div className="max-w-[220px] space-y-1 text-xs text-slate-600">
+                      {Object.entries(booking.formValues)
+                        .filter(([, value]) => Boolean(value))
+                        .slice(0, 3)
+                        .map(([key, value]) => {
+                          const field = exhibition.bookingFields.find((item) => item.fieldId === key);
+                          return (
+                            <div key={key} className="truncate">
+                              <span className="text-slate-400">{field?.label ?? key}：</span>
+                              {value}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">-</span>
+                  )}
+                </Td>
                 <Td>
                   <span className={booking.signedInAt ? "font-medium text-emerald-700" : "text-slate-400"}>
                     {booking.signedInAt ? "已签到" : "未签到"}
@@ -1865,7 +2210,7 @@ function BookingList(props: {
                   <div className="flex flex-wrap gap-2">
                     <AdminAction onClick={() => window.alert(JSON.stringify(booking, null, 2))}>查看详情</AdminAction>
                     <AdminAction onClick={() => props.cancelBooking(booking.bookingId)}>取消预约</AdminAction>
-                    <AdminAction onClick={() => props.checkInBooking(booking.bookingId)}>模拟核销</AdminAction>
+                    <AdminAction onClick={() => props.checkInBooking(booking.bookingId)}>模拟签到</AdminAction>
                   </div>
                 </Td>
               </tr>
@@ -1920,7 +2265,7 @@ function StatusPill({ status }: { status: SessionStatus }) {
 
 function BookingStatusPill({ status }: { status: BookingStatus }) {
   const className =
-    status === "pending_use"
+    status === "pending_checkin"
       ? "bg-blue-50 text-blue-700"
       : status === "checked_in"
         ? "bg-emerald-50 text-emerald-700"
