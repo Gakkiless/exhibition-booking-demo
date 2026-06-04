@@ -27,6 +27,7 @@ export type Exhibition = {
 export type BookingField = {
   fieldId: string;
   label: string;
+  required: boolean;
 };
 
 export type BookingRule = {
