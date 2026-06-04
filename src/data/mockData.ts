@@ -56,7 +56,7 @@ export const initialState: AppState = {
       sharePosterTitle: "流动的城市：当代艺术沉浸展",
       sharePosterDesc: "会员专属预约通道，扫码进入松赞小程序查看活动详情。",
       description:
-        "以装置、影像与交互媒介呈现城市更新中的空间记忆。展览设置限流预约，会员凭预约码入场。",
+        "以装置、影像与交互媒介呈现城市更新中的空间记忆。活动设置限流预约，会员凭预约码入场。",
       location: "上海市徐汇区西岸艺术中心 A 馆",
       exhibitionStartTime: "2026-06-20 10:00",
       exhibitionEndTime: "2026-07-20 20:00",
