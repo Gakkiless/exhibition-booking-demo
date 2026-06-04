@@ -48,7 +48,6 @@ export type ExhibitionSession = {
   startTime: string;
   endTime: string;
   totalStock: number;
-  publicStock: number;
   bookedCount: number;
   status: SessionStatus;
 };
