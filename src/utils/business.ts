@@ -8,17 +8,48 @@ import type {
   SessionStatus,
 } from "../types/domain";
 
-export const activeBookingStatuses: BookingStatus[] = ["pending_use", "checked_in"];
+export const activeBookingStatuses: BookingStatus[] = ["pending_checkin", "checked_in"];
 
 export function remainingStock(session: ExhibitionSession) {
   return Math.max(session.totalStock - session.bookedCount, 0);
 }
 
-export function displaySessionStatus(session: ExhibitionSession): SessionStatus {
+export function internalStock(session: ExhibitionSession) {
+  return Math.max(session.totalStock - session.publicStock, 0);
+}
+
+export function internalBookedCount(bookings: Booking[], sessionId: string) {
+  return bookings.filter(
+    (booking) =>
+      booking.sessionId === sessionId &&
+      booking.source === "销售代客预约" &&
+      activeBookingStatuses.includes(booking.status),
+  ).length;
+}
+
+export function publicBookedCount(session: ExhibitionSession, bookings: Booking[]) {
+  return Math.max(session.bookedCount - internalBookedCount(bookings, session.sessionId), 0);
+}
+
+export function publicRemainingStock(session: ExhibitionSession, bookings: Booking[]) {
+  return Math.max(session.publicStock - publicBookedCount(session, bookings), 0);
+}
+
+export function internalRemainingStock(session: ExhibitionSession, bookings: Booking[]) {
+  return Math.max(internalStock(session) - internalBookedCount(bookings, session.sessionId), 0);
+}
+
+export function displaySessionStatus(session: ExhibitionSession, bookings?: Booking[], channel: "client" | "sales" | "total" = "total"): SessionStatus {
   if (session.status === "closed" || session.status === "ended" || session.status === "pending") {
     return session.status;
   }
-  if (remainingStock(session) <= 0) {
+  const remain =
+    channel === "client" && bookings
+      ? publicRemainingStock(session, bookings)
+      : channel === "sales" && bookings
+        ? Math.min(remainingStock(session), internalRemainingStock(session, bookings))
+        : remainingStock(session);
+  if (remain <= 0) {
     return "full";
   }
   return "open";
@@ -37,16 +68,24 @@ export function statusText(status: SessionStatus) {
 
 export function bookingStatusText(status: BookingStatus) {
   const map: Record<BookingStatus, string> = {
-    pending_use: "待使用",
+    pending_checkin: "待签到",
     cancelled: "已取消",
-    checked_in: "已核销",
+    checked_in: "已签到",
     expired: "已过期",
   };
   return map[status];
 }
 
-export function canSelectSession(session: ExhibitionSession) {
-  return displaySessionStatus(session) === "open" && remainingStock(session) > 0;
+export function canSelectSession(session: ExhibitionSession, bookings?: Booking[], channel: "client" | "sales" | "total" = "total") {
+  return displaySessionStatus(session, bookings, channel) === "open";
+}
+
+export function canClientBookSession(session: ExhibitionSession, bookings: Booking[]) {
+  return canSelectSession(session, bookings, "client") && publicRemainingStock(session, bookings) > 0;
+}
+
+export function canSalesBookSession(session: ExhibitionSession, bookings: Booking[]) {
+  return canSelectSession(session, bookings, "sales") && remainingStock(session) > 0 && internalRemainingStock(session, bookings) > 0;
 }
 
 export function hasActiveBookingForExhibition(
@@ -69,10 +108,11 @@ type ValidationInput = {
   session: ExhibitionSession;
   bookings: Booking[];
   noticeAccepted: boolean;
+  channel?: "client" | "sales";
 };
 
 export function validateBooking(input: ValidationInput): string | null {
-  const { member, exhibition, rule, session, bookings, noticeAccepted } = input;
+  const { member, exhibition, rule, session, bookings, noticeAccepted, channel = "client" } = input;
 
   if (rule.loginRequired && !member.isLoggedIn) return "请先登录会员账号后再预约";
   if (exhibition.status !== "published") return "当前活动未上架，暂不可预约";
@@ -83,7 +123,11 @@ export function validateBooking(input: ValidationInput): string | null {
   if (rule.oneSessionPerMember && hasActiveBookingForExhibition(bookings, exhibition.exhibitionId, member.memberId)) {
     return "当前活动限制每位会员只能预约一个场次";
   }
-  if (!canSelectSession(session)) return `该场次${statusText(displaySessionStatus(session))}，不可预约`;
+  if (channel === "sales") {
+    if (!canSalesBookSession(session, bookings)) return "内部销售库存不足，销售不可继续代约";
+  } else if (!canClientBookSession(session, bookings)) {
+    return `该场次${statusText(displaySessionStatus(session, bookings, "client"))}，不可预约`;
+  }
   if (!noticeAccepted) return "请先勾选并确认预约须知";
   return null;
 }
