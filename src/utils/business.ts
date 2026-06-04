@@ -33,7 +33,7 @@ export function publicRemainingStock(session: ExhibitionSession, bookings: Booki
 }
 
 export function displaySessionStatus(session: ExhibitionSession, bookings?: Booking[], channel: "client" | "sales" | "total" = "total"): SessionStatus {
-  if (session.status === "closed" || session.status === "ended" || session.status === "pending") {
+  if (session.status === "ended" || session.status === "pending") {
     return session.status;
   }
   if (channel === "sales") {
@@ -55,7 +55,6 @@ export function statusText(status: SessionStatus) {
     open: "可预约",
     full: "已约满",
     ended: "已结束",
-    closed: "已关闭",
   };
   return map[status];
 }
