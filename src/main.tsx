@@ -7,6 +7,7 @@ import {
   ChevronRight,
   CircleAlert,
   ClipboardList,
+  Download,
   Home,
   LogIn,
   LogOut,
@@ -14,6 +15,7 @@ import {
   Settings,
   Share2,
   ShieldCheck,
+  Send,
   Ticket,
   UserCircle2,
   UserRound,
@@ -111,6 +113,34 @@ function App() {
       notify("分享链接已复制", "success");
     } catch {
       notify("当前浏览器不支持复制，请手动复制地址栏链接", "info");
+    }
+  }
+
+  function savePosterImage() {
+    const link = document.createElement("a");
+    link.href = exhibition.sharePosterImage;
+    link.download = `${exhibition.title}-分享海报.jpg`;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.click();
+    notify("已触发保存海报图，真实项目可接小程序海报生成接口", "success");
+  }
+
+  async function forwardToFriend() {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: exhibition.sharePosterTitle,
+          text: exhibition.sharePosterDesc,
+          url: window.location.href,
+        });
+        notify("已唤起转发给好友", "success");
+        return;
+      }
+      await navigator.clipboard.writeText(window.location.href);
+      notify("当前浏览器不支持系统分享，已复制活动链接", "info");
+    } catch {
+      notify("转发已取消或暂不可用", "info");
     }
   }
 
@@ -275,17 +305,8 @@ function App() {
     notify("场次已更新，库存展示已同步", "success");
   }
 
-  function addSession() {
-    const next: ExhibitionSession = {
-      sessionId: `SES${Date.now()}`,
-      exhibitionId: selectedExhibitionId,
-      sessionName: "新增场次",
-      startTime: "2026-06-25 14:00",
-      endTime: "2026-06-25 16:00",
-      totalStock: 30,
-      bookedCount: 0,
-      status: "open",
-    };
+  function addSession(next: ExhibitionSession) {
+    // TODO API: 新增场次应提交到后端，由后端返回场次 ID、库存和初始状态。
     setState((current) => ({ ...current, sessions: [...current.sessions, next] }));
     notify("已新增场次", "success");
   }
@@ -362,6 +383,8 @@ function App() {
           exhibition={exhibition}
           onClose={() => setSharePosterOpen(false)}
           copyShareLink={copyShareLink}
+          savePosterImage={savePosterImage}
+          forwardToFriend={forwardToFriend}
         />
       )}
       {toast && <ToastView toast={toast} />}
@@ -507,10 +530,14 @@ function SharePosterSheet({
   exhibition,
   onClose,
   copyShareLink,
+  savePosterImage,
+  forwardToFriend,
 }: {
   exhibition: Exhibition;
   onClose: () => void;
   copyShareLink: () => void;
+  savePosterImage: () => void;
+  forwardToFriend: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/50 px-4 pb-4">
@@ -537,9 +564,28 @@ function SharePosterSheet({
             </div>
           </div>
         </div>
-        <button onClick={copyShareLink} className="mt-4 h-11 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
-          复制活动链接
-        </button>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <button
+            onClick={savePosterImage}
+            className="flex h-11 items-center justify-center gap-1 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700"
+          >
+            <Download size={15} />
+            保存海报
+          </button>
+          <button
+            onClick={forwardToFriend}
+            className="flex h-11 items-center justify-center gap-1 rounded-xl bg-slate-950 text-xs font-semibold text-white"
+          >
+            <Send size={15} />
+            转发好友
+          </button>
+          <button
+            onClick={copyShareLink}
+            className="h-11 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700"
+          >
+            复制链接
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -992,6 +1038,10 @@ function timePart(value: string) {
   return value.slice(11, 16);
 }
 
+function composeDateTime(date: string, time: string) {
+  return `${date} ${time}`;
+}
+
 function formatDateLabel(date: string) {
   return `${date.slice(5).replace("-", "月")}日 ${weekdayLabel(date)}`;
 }
@@ -1243,7 +1293,7 @@ function AdminShell(props: {
   updateExhibition: (next: Exhibition) => void;
   updateRule: (next: BookingRule) => void;
   updateSession: (next: ExhibitionSession) => void;
-  addSession: () => void;
+  addSession: (next: ExhibitionSession) => void;
   cancelBooking: (bookingId: string) => void;
   checkInBooking: (bookingId: string) => void;
   assistBooking: (member: Member, exhibitionId: string, sessionId: string, formValues: Record<string, string>) => boolean;
@@ -1337,6 +1387,7 @@ function AdminShell(props: {
         )}
         {props.page === "sessions" && (
           <AdminSessions
+            exhibitionId={props.selectedExhibitionId}
             sessions={selectedSessions}
             bookings={selectedBookings}
             updateSession={props.updateSession}
@@ -1866,18 +1917,42 @@ function ConfigPage(props: {
 }
 
 function AdminSessions({
+  exhibitionId,
   sessions,
   bookings,
   updateSession,
   addSession,
 }: {
+  exhibitionId: string;
   sessions: ExhibitionSession[];
   bookings: Booking[];
   updateSession: (next: ExhibitionSession) => void;
-  addSession: () => void;
+  addSession: (next: ExhibitionSession) => void;
 }) {
+  const [creating, setCreating] = useState(false);
+
   return (
-    <Panel title="场次管理" action={<button onClick={addSession} className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white">新增场次</button>}>
+    <Panel
+      title="场次管理"
+      action={
+        <button
+          onClick={() => setCreating((value) => !value)}
+          className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white"
+        >
+          {creating ? "收起新增" : "新增场次"}
+        </button>
+      }
+    >
+      {creating && (
+        <NewSessionForm
+          exhibitionId={exhibitionId}
+          onCancel={() => setCreating(false)}
+          onSubmit={(next) => {
+            addSession(next);
+            setCreating(false);
+          }}
+        />
+      )}
       <Table>
         <thead>
           <tr>
@@ -1902,6 +1977,98 @@ function AdminSessions({
   );
 }
 
+function NewSessionForm({
+  exhibitionId,
+  onSubmit,
+  onCancel,
+}: {
+  exhibitionId: string;
+  onSubmit: (next: ExhibitionSession) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    sessionName: "新增场次",
+    date: "2026-06-25",
+    startTime: "14:00",
+    endTime: "16:00",
+    totalStock: 30,
+  });
+
+  return (
+    <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="mb-3 text-sm font-semibold text-slate-950">新增场次</div>
+      <div className="grid gap-3 md:grid-cols-5">
+        <label className="block text-sm md:col-span-1">
+          <span className="mb-1 block font-medium text-slate-700">场次名称</span>
+          <input
+            value={draft.sessionName}
+            onChange={(event) => setDraft({ ...draft, sessionName: event.target.value })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">日期</span>
+          <input
+            type="date"
+            value={draft.date}
+            onChange={(event) => setDraft({ ...draft, date: event.target.value })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">开始时间</span>
+          <input
+            type="time"
+            value={draft.startTime}
+            onChange={(event) => setDraft({ ...draft, startTime: event.target.value })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">结束时间</span>
+          <input
+            type="time"
+            value={draft.endTime}
+            onChange={(event) => setDraft({ ...draft, endTime: event.target.value })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">总库存</span>
+          <input
+            type="number"
+            value={draft.totalStock}
+            onChange={(event) => setDraft({ ...draft, totalStock: Number(event.target.value) || 0 })}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+          />
+        </label>
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+          取消
+        </button>
+        <button
+          onClick={() =>
+            onSubmit({
+              sessionId: `SES${Date.now()}`,
+              exhibitionId,
+              sessionName: draft.sessionName || "新增场次",
+              startTime: composeDateTime(draft.date, draft.startTime),
+              endTime: composeDateTime(draft.date, draft.endTime),
+              totalStock: Math.max(draft.totalStock, 0),
+              bookedCount: 0,
+              status: "open",
+            })
+          }
+          className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+        >
+          保存新增场次
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SessionRow({
   session,
   bookings,
@@ -1913,15 +2080,36 @@ function SessionRow({
 }) {
   const [draft, setDraft] = useState(session);
   React.useEffect(() => setDraft(session), [session]);
+  const displayStatus = displaySessionStatus(draft);
 
   return (
     <tr className="border-t border-slate-100 align-top">
       <Td><InlineInput value={draft.sessionName} onChange={(sessionName) => setDraft({ ...draft, sessionName })} /></Td>
-      <Td>{draft.startTime.slice(0, 10)}</Td>
       <Td>
-        <div className="space-y-2">
-          <InlineInput value={draft.startTime} onChange={(startTime) => setDraft({ ...draft, startTime })} />
-          <InlineInput value={draft.endTime} onChange={(endTime) => setDraft({ ...draft, endTime })} />
+        <InlineInput
+          type="date"
+          value={datePart(draft.startTime)}
+          onChange={(date) =>
+            setDraft({
+              ...draft,
+              startTime: composeDateTime(date, timePart(draft.startTime)),
+              endTime: composeDateTime(date, timePart(draft.endTime)),
+            })
+          }
+        />
+      </Td>
+      <Td>
+        <div className="grid gap-2">
+          <InlineInput
+            type="time"
+            value={timePart(draft.startTime)}
+            onChange={(startTime) => setDraft({ ...draft, startTime: composeDateTime(datePart(draft.startTime), startTime) })}
+          />
+          <InlineInput
+            type="time"
+            value={timePart(draft.endTime)}
+            onChange={(endTime) => setDraft({ ...draft, endTime: composeDateTime(datePart(draft.startTime), endTime) })}
+          />
         </div>
       </Td>
       <Td><InlineInput type="number" value={String(draft.totalStock)} onChange={(value) => setDraft({ ...draft, totalStock: Number(value) || 0 })} /></Td>
@@ -1929,16 +2117,7 @@ function SessionRow({
       <Td>{remainingStock(draft)}</Td>
       <Td>{internalBookedCount(bookings, draft.sessionId)}</Td>
       <Td>
-        <select
-          value={draft.status}
-          onChange={(event) => setDraft({ ...draft, status: event.target.value as SessionStatus })}
-          className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
-        >
-          <option value="pending">未开放</option>
-          <option value="open">可预约</option>
-          <option value="ended">已结束</option>
-          <option value="closed">已关闭</option>
-        </select>
+        <StatusPill status={displayStatus} />
       </Td>
       <Td>
         <div className="flex gap-2">
@@ -1952,7 +2131,6 @@ function SessionRow({
           >
             保存
           </AdminAction>
-          <AdminAction onClick={() => updateSession({ ...draft, status: "closed" })}>关闭场次</AdminAction>
         </div>
       </Td>
     </tr>
