@@ -11,7 +11,6 @@ import {
   LogIn,
   LogOut,
   QrCode,
-  ScanLine,
   Settings,
   Share2,
   ShieldCheck,
@@ -50,7 +49,7 @@ import {
   validateBooking,
 } from "./utils/business";
 
-type ClientPage = "detail" | "center" | "confirm" | "success" | "my" | "scan" | "voucher";
+type ClientPage = "detail" | "center" | "confirm" | "success" | "my";
 type AdminPage = "dashboard" | "activities" | "config" | "sessions" | "bookings" | "assist";
 type AdminRole = "operator" | "sales";
 
@@ -74,7 +73,6 @@ function App() {
   const [selectedExhibitionId, setSelectedExhibitionId] = useState("EXH001");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [lastBookingId, setLastBookingId] = useState<string | null>(null);
-  const [voucherBookingId, setVoucherBookingId] = useState<string | null>(null);
   const [sharePosterOpen, setSharePosterOpen] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
 
@@ -105,44 +103,6 @@ function App() {
     setClientPage("detail");
     setSelectedSessionId(null);
     notify("已退出模拟登录", "info");
-  }
-
-  function scanSignIn() {
-    if (rule.loginRequired && !state.member.isLoggedIn) {
-      notify("请先登录会员账号后再签到", "error");
-      setClientPage("scan");
-      return;
-    }
-    const activeBooking = state.bookings.find(
-      (booking) =>
-        booking.exhibitionId === selectedExhibitionId &&
-        booking.memberId === state.member.memberId &&
-        booking.status === "pending_checkin",
-    );
-    if (!activeBooking) {
-      setClientPage("scan");
-      notify("未查询到可签到预约，请先预约后续场次", "error");
-      return;
-    }
-    // TODO API: 微信扫码现场二维码后，应由后端校验预约记录并写入签到时间、签到来源和现场二维码点位。
-    const signedAt = nowText();
-    setState((current) => ({
-      ...current,
-      bookings: current.bookings.map((booking) =>
-        booking.bookingId === activeBooking.bookingId && !booking.signedInAt
-          ? {
-              ...booking,
-              status: "checked_in",
-              signedInAt: signedAt,
-              checkedInAt: signedAt,
-              signInSource: "现场二维码",
-            }
-          : booking,
-      ),
-    }));
-    setLastBookingId(activeBooking.bookingId);
-    setClientPage("scan");
-    notify("现场签到成功", "success");
   }
 
   async function copyShareLink() {
@@ -356,7 +316,6 @@ function App() {
             sessions={sessions}
             selectedSession={selectedSession}
             lastBooking={lastBooking}
-            voucherBookingId={voucherBookingId}
             page={clientPage}
             setPage={setClientPage}
             login={login}
@@ -376,12 +335,7 @@ function App() {
             }}
             submitBooking={submitBooking}
             cancelBooking={cancelBooking}
-            scanSignIn={scanSignIn}
             shareActivity={shareActivity}
-            openVoucher={(bookingId) => {
-              setVoucherBookingId(bookingId);
-              setClientPage("voucher");
-            }}
           />
         ) : (
           <AdminShell
@@ -455,7 +409,6 @@ function ClientShell(props: {
   sessions: ExhibitionSession[];
   selectedSession: ExhibitionSession | null;
   lastBooking: Booking | null;
-  voucherBookingId: string | null;
   page: ClientPage;
   setPage: (page: ClientPage) => void;
   login: () => void;
@@ -463,9 +416,7 @@ function ClientShell(props: {
   selectSession: (sessionId: string) => void;
   submitBooking: (noticeAccepted: boolean, formValues: Record<string, string>) => void;
   cancelBooking: (bookingId: string) => void;
-  scanSignIn: () => void;
   shareActivity: () => void;
-  openVoucher: (bookingId: string) => void;
 }) {
   const myBookings = props.state.bookings.filter(
     (booking) => booking.memberId === props.state.member.memberId,
@@ -499,7 +450,6 @@ function ClientShell(props: {
             setPage={props.setPage}
             exhibitions={props.state.exhibitions}
             sessions={props.state.sessions}
-            openVoucher={props.openVoucher}
           />
         )}
         {props.page === "confirm" && props.selectedSession && (
@@ -524,25 +474,6 @@ function ClientShell(props: {
             exhibitions={props.state.exhibitions}
             sessions={props.state.sessions}
             cancelBooking={props.cancelBooking}
-          />
-        )}
-        {props.page === "voucher" && props.voucherBookingId && (
-          <BookingVoucherPage
-            booking={props.state.bookings.find((booking) => booking.bookingId === props.voucherBookingId) ?? null}
-            exhibitions={props.state.exhibitions}
-            sessions={props.state.sessions}
-            setPage={props.setPage}
-          />
-        )}
-        {props.page === "scan" && (
-          <ScanSignInPage
-            member={props.state.member}
-            bookings={myBookings}
-            exhibitions={props.state.exhibitions}
-            sessions={props.state.sessions}
-            login={props.login}
-            setPage={props.setPage}
-            scanSignIn={props.scanSignIn}
           />
         )}
         <ClientBottomTabs page={props.page} setPage={props.setPage} />
@@ -622,8 +553,8 @@ function MiniProgramCenter(props: {
   login: () => void;
   logout: () => void;
   setPage: (page: ClientPage) => void;
-  openVoucher: (bookingId: string) => void;
 }) {
+  const [voucherOpen, setVoucherOpen] = useState(false);
   const demoToday = "2026-06-04";
   const todayBooking = props.bookings.find((booking) => {
     const session = props.sessions.find((item) => item.sessionId === booking.sessionId);
@@ -664,11 +595,13 @@ function MiniProgramCenter(props: {
               <div className="text-sm font-semibold text-slate-950">今日活动凭证</div>
               <div className="mt-1 text-xs text-slate-500">{formatRange(todaySession.startTime, todaySession.endTime)}</div>
             </div>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">待签到</span>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              {bookingStatusText(todayBooking.status)}
+            </span>
           </div>
           <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{todayExhibition.title}</div>
           <button
-            onClick={() => props.openVoucher(todayBooking.bookingId)}
+            onClick={() => setVoucherOpen(true)}
             className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white"
           >
             <QrCode size={16} />
@@ -684,26 +617,22 @@ function MiniProgramCenter(props: {
           desc="查看预约凭证、取消预约和签到状态"
           onClick={() => props.setPage("my")}
         />
-        <CenterMenuItem
-          icon={<ScanLine size={18} />}
-          title="现场扫码签到"
-          desc="模拟微信扫描现场二维码后签到"
-          onClick={() => props.setPage("scan")}
-        />
-        <CenterMenuItem
-          icon={<CalendarDays size={18} />}
-          title="预约后续场次"
-          desc="返回活动预约 Demo 页选择日期和场次"
-          onClick={() => props.setPage("detail")}
-        />
       </section>
 
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold text-slate-950">Demo 说明</div>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          本页模拟松赞小程序个人中心。活动预约只是其中一个业务入口，会员从个人中心进入预约记录，也可以在到场后通过微信扫码完成签到。
+          本页模拟松赞小程序个人中心。会员预约后在这里出示活动凭证，到场后由员工端扫描客人手机里的预约凭证完成签到。
         </p>
       </section>
+      {voucherOpen && todayBooking && todayExhibition && todaySession && (
+        <BookingVoucherModal
+          booking={todayBooking}
+          exhibition={todayExhibition}
+          session={todaySession}
+          onClose={() => setVoucherOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -728,88 +657,6 @@ function CenterMenuItem({
       </span>
       <ChevronRight size={18} className="text-slate-300" />
     </button>
-  );
-}
-
-function ScanSignInPage(props: {
-  member: AppState["member"];
-  bookings: Booking[];
-  exhibitions: Exhibition[];
-  sessions: ExhibitionSession[];
-  login: () => void;
-  setPage: (page: ClientPage) => void;
-  scanSignIn: () => void;
-}) {
-  const latestActive = props.bookings.find((booking) => booking.status === "pending_checkin");
-  const latestSigned = props.bookings.find((booking) => Boolean(booking.signedInAt));
-  const targetBooking = latestSigned ?? latestActive;
-  const exhibition = targetBooking
-    ? props.exhibitions.find((item) => item.exhibitionId === targetBooking.exhibitionId)
-    : null;
-  const session = targetBooking
-    ? props.sessions.find((item) => item.sessionId === targetBooking.sessionId)
-    : null;
-
-  return (
-    <div className="space-y-4 p-4">
-      <section className="rounded-2xl bg-white p-5 text-center shadow-sm">
-        <div className="mx-auto flex h-36 w-36 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
-          <QrCode size={76} className="text-slate-400" />
-        </div>
-        <h2 className="mt-4 text-xl font-semibold text-slate-950">现场二维码签到</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-500">
-          模拟客人到场后使用微信扫描现场二维码。系统会校验当前会员是否存在待签到预约，只有预约过活动的会员才能签到。
-        </p>
-      </section>
-
-      {!props.member.isLoggedIn ? (
-        <section className="rounded-2xl bg-white p-4 text-center shadow-sm">
-          <CircleAlert className="mx-auto text-amber-600" size={34} />
-          <div className="mt-3 text-sm font-semibold text-slate-950">请先登录后签到</div>
-          <p className="mt-2 text-sm text-slate-500">签到需要读取当前会员身份，不能代他人签到。</p>
-          <button onClick={props.login} className="mt-4 h-11 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
-            模拟登录
-          </button>
-        </section>
-      ) : targetBooking && targetBooking.signedInAt ? (
-        <section className="rounded-2xl bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-sm font-semibold text-emerald-700">
-            <CheckCircle2 size={18} />
-            签到成功
-          </div>
-          <InfoRow label="展览" value={exhibition?.title ?? "-"} />
-          <InfoRow label="场次" value={session ? formatRange(session.startTime, session.endTime) : "-"} />
-          <InfoRow label="会员" value={targetBooking.memberName} />
-          <InfoRow label="预约码" value={targetBooking.bookingCode} />
-          <InfoRow label="签到时间" value={targetBooking.signedInAt} />
-          <InfoRow label="签到来源" value={targetBooking.signInSource ?? "现场二维码"} />
-          <button onClick={() => props.setPage("my")} className="mt-4 h-11 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
-            查看我的预约
-          </button>
-        </section>
-      ) : latestActive ? (
-        <section className="rounded-2xl bg-white p-4 text-center shadow-sm">
-          <div className="text-sm font-semibold text-slate-950">已识别到预约记录</div>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            {exhibition?.title} · {session ? formatRange(session.startTime, session.endTime) : ""}
-          </p>
-          <button onClick={props.scanSignIn} className="mt-4 h-11 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
-            模拟微信扫码签到
-          </button>
-        </section>
-      ) : (
-        <section className="rounded-2xl bg-white p-4 text-center shadow-sm">
-          <CircleAlert className="mx-auto text-rose-600" size={34} />
-          <div className="mt-3 text-sm font-semibold text-slate-950">未查询到可签到预约</div>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            只有预约过活动的会员才能签到。请先返回活动预约 Demo 页，选择后续开放场次完成预约。
-          </p>
-          <button onClick={() => props.setPage("detail")} className="mt-4 h-11 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
-            去预约后续场次
-          </button>
-        </section>
-      )}
-    </div>
   );
 }
 
@@ -959,7 +806,7 @@ function ClientBookingHome(props: {
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-2 text-sm font-semibold text-slate-950">活动详细介绍</div>
         <p className="text-sm leading-6 text-slate-600">
-          本展览采用分场次预约入场。会员完成预约后将在小程序内获得预约码和二维码占位凭证，现场可扫码签到或由工作人员通过后台模拟签到。
+          本展览采用分场次预约入场。会员完成预约后将在小程序内获得预约码和二维码占位凭证，现场由员工端扫描客人手机里的预约凭证完成签到。
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
       </section>
@@ -1281,31 +1128,30 @@ function SuccessPage({
   );
 }
 
-function BookingVoucherPage({
+function BookingVoucherModal({
   booking,
-  exhibitions,
-  sessions,
-  setPage,
+  exhibition,
+  session,
+  onClose,
 }: {
-  booking: Booking | null;
-  exhibitions: Exhibition[];
-  sessions: ExhibitionSession[];
-  setPage: (page: ClientPage) => void;
+  booking: Booking;
+  exhibition: Exhibition;
+  session: ExhibitionSession;
+  onClose: () => void;
 }) {
-  if (!booking) {
-    return (
-      <div className="p-4">
-        <section className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
-          未找到预约凭证
-        </section>
-      </div>
-    );
-  }
-  const exhibition = exhibitions.find((item) => item.exhibitionId === booking.exhibitionId);
-  const session = sessions.find((item) => item.sessionId === booking.sessionId);
   return (
-    <div className="space-y-4 p-4">
-      <section className="rounded-2xl bg-white p-5 text-center shadow-sm">
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/45 px-4 pb-4">
+      <section className="w-full max-w-[398px] rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-950">预约凭证二维码</div>
+            <div className="mt-1 text-xs text-slate-500">请向现场员工出示此凭证</div>
+          </div>
+          <button onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="rounded-2xl bg-slate-50 p-5 text-center">
         <div className="mx-auto flex h-36 w-36 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
           <QrCode size={78} className="text-slate-400" />
         </div>
@@ -1313,16 +1159,20 @@ function BookingVoucherPage({
           {booking.bookingCode}
         </div>
         <div className="mt-1 text-sm text-slate-500">{bookingStatusText(booking.status)}</div>
-      </section>
-      <section className="rounded-2xl bg-white p-4 shadow-sm">
-        <InfoRow label="展览名称" value={exhibition?.title ?? "-"} />
-        <InfoRow label="场次时间" value={session ? formatRange(session.startTime, session.endTime) : "-"} />
+        </div>
+        <div className="mt-4 rounded-2xl border border-slate-100 p-4">
+        <InfoRow label="展览名称" value={exhibition.title} />
+        <InfoRow label="场次时间" value={formatRange(session.startTime, session.endTime)} />
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
-      </section>
-      <button onClick={() => setPage("center")} className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
-        返回个人中心
+        <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
+          Demo 中二维码为占位图。真实项目中员工端扫描该凭证后，由后台校验预约码并写入签到状态。
+        </p>
+        </div>
+      <button onClick={onClose} className="mt-4 h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
+        关闭
       </button>
+      </section>
     </div>
   );
 }
