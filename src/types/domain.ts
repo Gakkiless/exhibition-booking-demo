@@ -16,6 +16,7 @@ export type Exhibition = {
   sharePosterTitle: string;
   sharePosterDesc: string;
   description: string;
+  detailedDescription: string;
   location: string;
   exhibitionStartTime: string;
   exhibitionEndTime: string;
