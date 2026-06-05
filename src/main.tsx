@@ -824,10 +824,7 @@ function ClientBookingHome(props: {
 
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-2 text-sm font-semibold text-slate-950">活动详细介绍</div>
-        <p className="text-sm leading-6 text-slate-600">
-          本活动采用分场次报名入场。会员完成报名后将在小程序内获得报名码和二维码占位凭证，现场由员工端扫描客人手机里的报名凭证完成签到。
-        </p>
-        <p className="mt-2 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
+        <p className="text-sm leading-6 text-slate-600">{props.exhibition.detailedDescription}</p>
       </section>
 
       <section className="rounded-2xl bg-white p-4 shadow-sm">
@@ -1421,6 +1418,15 @@ function Dashboard({
   sessions: ExhibitionSession[];
   bookings: Booking[];
 }) {
+  const sessionDates = useMemo(() => getSessionDates(sessions), [sessions]);
+  const [sessionDateFilter, setSessionDateFilter] = useState("all");
+  const filteredSessions = useMemo(
+    () =>
+      sessionDateFilter === "all"
+        ? sessions
+        : sessions.filter((session) => datePart(session.startTime) === sessionDateFilter),
+    [sessions, sessionDateFilter],
+  );
   const stats = useMemo(() => {
     const totalStock = sessions.reduce((sum, item) => sum + item.totalStock, 0);
     const booked = sessions.reduce((sum, item) => sum + item.bookedCount, 0);
@@ -1429,7 +1435,7 @@ function Dashboard({
       booked,
       remain: totalStock - booked,
       assisted: bookings.filter((item) => item.source === "销售代客报名").length,
-      signed: bookings.filter((item) => Boolean(item.signedInAt)).length,
+      signed: bookings.filter((item) => item.status === "checked_in" || Boolean(item.signedInAt)).length,
       cancelled: bookings.filter((item) => item.status === "cancelled").length,
     };
   }, [sessions, bookings]);
@@ -1449,20 +1455,50 @@ function Dashboard({
         <AdminMetric label="取消人数" value={stats.cancelled} />
         </div>
       </Panel>
-      <Panel title="各场次报名情况">
+      <Panel
+        title="各场次报名情况"
+        action={
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-500">
+            时间筛选
+            <select
+              value={sessionDateFilter}
+              onChange={(event) => setSessionDateFilter(event.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-950"
+            >
+              <option value="all">全部日期</option>
+              {sessionDates.map((date) => (
+                <option key={date} value={date}>
+                  {formatDateLabel(date)}
+                </option>
+              ))}
+            </select>
+          </label>
+        }
+      >
         <div className="space-y-4">
-          {sessions.map((session) => {
+          {filteredSessions.length === 0 && (
+            <div className="rounded-xl bg-slate-50 p-5 text-center text-sm text-slate-500">当前时间筛选下暂无场次</div>
+          )}
+          {filteredSessions.map((session) => {
             const percent = session.totalStock ? Math.round((session.bookedCount / session.totalStock) * 100) : 0;
             const signed = bookings.filter(
-              (booking) => booking.sessionId === session.sessionId && Boolean(booking.signedInAt),
+              (booking) =>
+                booking.sessionId === session.sessionId &&
+                (booking.status === "checked_in" || Boolean(booking.signedInAt)),
+            ).length;
+            const cancelled = bookings.filter(
+              (booking) => booking.sessionId === session.sessionId && booking.status === "cancelled",
             ).length;
             const assisted = internalBookedCount(bookings, session.sessionId);
             return (
               <div key={session.sessionId}>
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium text-slate-700">{session.sessionName}</span>
-                  <span className="text-slate-500">
-                    客用报名 {session.bookedCount}/{session.totalStock} · 内部代报名 {assisted} · 签到 {signed}
+                <div className="mb-2 flex flex-col gap-1 text-sm md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="font-medium text-slate-700">{session.sessionName}</div>
+                    <div className="mt-0.5 text-xs text-slate-400">{formatRange(session.startTime, session.endTime)}</div>
+                  </div>
+                  <span className="text-slate-500 md:text-right">
+                    客用报名 {session.bookedCount}/{session.totalStock} · 内部代报名 {assisted} · 签到 {signed} · 取消 {cancelled}
                   </span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -1820,6 +1856,11 @@ function ConfigPage(props: {
           <TextInput label="活动名称" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} />
           <TextInput label="主图 URL" value={draft.coverImage} onChange={(coverImage) => setDraft({ ...draft, coverImage })} />
           <TextArea label="活动简介" value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
+          <TextArea
+            label="活动详细描述"
+            value={draft.detailedDescription}
+            onChange={(detailedDescription) => setDraft({ ...draft, detailedDescription })}
+          />
           <TextInput label="活动地点" value={draft.location} onChange={(location) => setDraft({ ...draft, location })} />
           <div className="grid gap-3 md:grid-cols-2">
             <TextInput label="活动开始时间" value={draft.exhibitionStartTime} onChange={(exhibitionStartTime) => setDraft({ ...draft, exhibitionStartTime })} />
