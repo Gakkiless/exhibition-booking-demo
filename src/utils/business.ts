@@ -131,6 +131,9 @@ export function createBookingCode() {
 }
 
 export function formatRange(start: string, end: string) {
+  if (start.slice(0, 10) !== end.slice(0, 10)) {
+    return `${start} - ${end}`;
+  }
   return `${start} - ${end.slice(11)}`;
 }
 

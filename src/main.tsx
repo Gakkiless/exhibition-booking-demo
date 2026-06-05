@@ -58,6 +58,15 @@ type SalesUser = {
   salesRole: string;
 };
 
+function guestNameInitial(member: Member) {
+  return member.isRealNameVerified ? (member.realName || member.name) : "";
+}
+
+function bookingFormLabel(key: string, exhibition: Exhibition) {
+  if (key === "guestName") return "姓名";
+  return exhibition.bookingFields.find((item) => item.fieldId === key)?.label ?? key;
+}
+
 type Toast = {
   message: string;
   type: ToastType;
@@ -173,7 +182,7 @@ function App() {
       exhibitionId: targetExhibition.exhibitionId,
       sessionId: targetSession.sessionId,
       memberId: input.member.memberId,
-      memberName: input.member.name,
+      memberName: String(input.formValues?.guestName || input.member.realName || input.member.name),
       memberPhone: input.member.phone,
       memberLevel: input.member.level,
       bookingCount: 1,
@@ -745,8 +754,8 @@ function ClientBookingHome(props: {
             value={formatRange(props.exhibition.exhibitionStartTime, props.exhibition.exhibitionEndTime)}
           />
           <InfoRow
-            label="报名截止时间"
-            value={props.exhibition.bookingEndTime}
+            label="报名时间"
+            value={formatRange(props.exhibition.bookingStartTime, props.exhibition.bookingEndTime)}
           />
         </div>
       </section>
@@ -1005,9 +1014,15 @@ function composeDateTime(date: string, time: string) {
 }
 
 function missingRequiredBookingFields(exhibition: Exhibition, formValues: Record<string, string>) {
-  return exhibition.bookingFields
+  const missingFields = exhibition.bookingFields
     .filter((field) => field.required && !String(formValues[field.fieldId] ?? "").trim())
     .map((field) => field.label);
+
+  if (!String(formValues.guestName ?? "").trim()) {
+    return ["姓名", ...missingFields];
+  }
+
+  return missingFields;
 }
 
 function formatDateLabel(date: string) {
@@ -1038,27 +1053,30 @@ function ConfirmBooking(props: {
 }) {
   const [accepted, setAccepted] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>(
-    Object.fromEntries(props.exhibition.bookingFields.map((field) => [field.fieldId, ""])),
+    {
+      guestName: guestNameInitial(props.member),
+      ...Object.fromEntries(props.exhibition.bookingFields.map((field) => [field.fieldId, ""])),
+    },
   );
 
   React.useEffect(() => {
     setFormValues((current) => ({
+      guestName: current.guestName ?? guestNameInitial(props.member),
       ...Object.fromEntries(props.exhibition.bookingFields.map((field) => [field.fieldId, ""])),
       ...current,
+      ...(props.member.isRealNameVerified ? { guestName: guestNameInitial(props.member) } : {}),
     }));
-  }, [props.exhibition.bookingFields]);
+  }, [props.exhibition.bookingFields, props.member]);
 
   return (
     <div className="space-y-4 p-4">
       <h2 className="text-lg font-semibold text-slate-950">确认报名</h2>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-3 text-sm font-semibold text-slate-950">报名人信息</div>
-        <ReadonlyField label="会员ID" value={props.member.memberId} />
-        <ReadonlyField label="姓名" value={props.member.name} />
         <ReadonlyField label="手机号" value={props.member.phone} />
         <ReadonlyField label="报名人数" value="仅限1人" />
         <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-          不支持填写其他人姓名、修改手机号或选择多人；本报名凭证仅限当前会员本人使用。
+          本预约凭证仅限当前会员本人使用。
         </p>
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
@@ -1070,6 +1088,21 @@ function ConfirmBooking(props: {
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-3 text-sm font-semibold text-slate-950">客人补充信息</div>
         <div className="space-y-3">
+          <label className="block text-sm">
+            <span className="mb-1 flex items-center gap-2 text-slate-500">
+              姓名
+              <span className="text-xs font-semibold text-rose-600">必填</span>
+              {props.member.isRealNameVerified && <span className="text-xs text-slate-400">已实名</span>}
+            </span>
+            <input
+              value={formValues.guestName ?? ""}
+              onChange={(event) => setFormValues({ ...formValues, guestName: event.target.value })}
+              disabled={props.member.isRealNameVerified}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-950 disabled:bg-slate-50 disabled:text-slate-500"
+              placeholder="请输入姓名"
+              required
+            />
+          </label>
           {props.exhibition.bookingFields.map((field) => (
             <label key={field.fieldId} className="block text-sm">
               <span className="mb-1 flex items-center gap-2 text-slate-500">
@@ -1497,8 +1530,12 @@ function AssistedBookingPage(props: {
   }, [selectedExhibitionId, selectedDate, selectedMemberId]);
 
   React.useEffect(() => {
-    setFormValues(Object.fromEntries((selectedExhibition?.bookingFields ?? []).map((field) => [field.fieldId, ""])));
-  }, [selectedExhibitionId, selectedExhibition?.bookingFields]);
+    setFormValues((current) => ({
+      ...Object.fromEntries((selectedExhibition?.bookingFields ?? []).map((field) => [field.fieldId, ""])),
+      ...current,
+      guestName: selectedMember ? guestNameInitial(selectedMember) : "",
+    }));
+  }, [selectedExhibitionId, selectedExhibition?.bookingFields, selectedMember]);
 
   function submitAssistedBooking() {
     setMessage("");
@@ -1659,6 +1696,21 @@ function AssistedBookingPage(props: {
               <div className="rounded-xl border border-slate-200 p-4">
                 <div className="mb-3 text-sm font-semibold text-slate-950">客人补充信息</div>
                 <div className="grid gap-3 md:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-1 flex items-center gap-2 font-medium text-slate-700">
+                      姓名
+                      <span className="text-xs font-semibold text-rose-600">必填</span>
+                      {selectedMember?.isRealNameVerified && <span className="text-xs font-normal text-slate-400">已实名</span>}
+                    </span>
+                    <input
+                      value={formValues.guestName ?? ""}
+                      onChange={(event) => setFormValues({ ...formValues, guestName: event.target.value })}
+                      disabled={selectedMember?.isRealNameVerified}
+                      placeholder="请输入姓名"
+                      required
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950 disabled:bg-slate-50 disabled:text-slate-500"
+                    />
+                  </label>
                   {selectedExhibition.bookingFields.map((field) => (
                     <label key={field.fieldId} className="block text-sm">
                       <span className="mb-1 flex items-center gap-2 font-medium text-slate-700">
@@ -1773,7 +1825,7 @@ function ConfigPage(props: {
             <TextInput label="活动开始时间" value={draft.exhibitionStartTime} onChange={(exhibitionStartTime) => setDraft({ ...draft, exhibitionStartTime })} />
             <TextInput label="活动结束时间" value={draft.exhibitionEndTime} onChange={(exhibitionEndTime) => setDraft({ ...draft, exhibitionEndTime })} />
             <TextInput label="报名开始时间" value={draft.bookingStartTime} onChange={(bookingStartTime) => setDraft({ ...draft, bookingStartTime })} />
-            <TextInput label="报名截止时间" value={draft.bookingEndTime} onChange={(bookingEndTime) => setDraft({ ...draft, bookingEndTime })} />
+            <TextInput label="报名时间" value={draft.bookingEndTime} onChange={(bookingEndTime) => setDraft({ ...draft, bookingEndTime })} />
           </div>
           <TextArea label="报名须知" value={draft.notice} onChange={(notice) => setDraft({ ...draft, notice })} />
           <div className="rounded-xl border border-slate-200 p-4">
@@ -2184,10 +2236,9 @@ function BookingList(props: {
                         .filter(([, value]) => Boolean(value))
                         .slice(0, 3)
                         .map(([key, value]) => {
-                          const field = exhibition.bookingFields.find((item) => item.fieldId === key);
                           return (
                             <div key={key} className="truncate">
-                              <span className="text-slate-400">{field?.label ?? key}：</span>
+                              <span className="text-slate-400">{bookingFormLabel(key, exhibition)}：</span>
                               {value}
                             </div>
                           );

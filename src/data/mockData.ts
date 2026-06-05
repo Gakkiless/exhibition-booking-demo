@@ -4,6 +4,8 @@ export const initialState: AppState = {
   member: {
     memberId: "MBR20260603001",
     name: "林嘉怡",
+    realName: "林嘉怡",
+    isRealNameVerified: true,
     phone: "138****5821",
     level: "铂金会员",
     isLoggedIn: true,
@@ -12,6 +14,8 @@ export const initialState: AppState = {
     {
       memberId: "MBR20260603001",
       name: "林嘉怡",
+      realName: "林嘉怡",
+      isRealNameVerified: true,
       phone: "138****5821",
       level: "铂金会员",
       isLoggedIn: true,
@@ -19,6 +23,8 @@ export const initialState: AppState = {
     {
       memberId: "MBR90008888",
       name: "赵明",
+      realName: "赵明",
+      isRealNameVerified: true,
       phone: "139****7720",
       level: "金卡会员",
       isLoggedIn: false,
@@ -26,6 +32,8 @@ export const initialState: AppState = {
     {
       memberId: "MBR20260518006",
       name: "陈知予",
+      realName: "陈知予",
+      isRealNameVerified: true,
       phone: "136****9042",
       level: "黑卡会员",
       isLoggedIn: false,
@@ -33,6 +41,7 @@ export const initialState: AppState = {
     {
       memberId: "MBR20260411019",
       name: "宋闻",
+      isRealNameVerified: false,
       phone: "137****3188",
       level: "银卡会员",
       isLoggedIn: false,
@@ -40,6 +49,7 @@ export const initialState: AppState = {
     {
       memberId: "MBR20260329012",
       name: "许安然",
+      isRealNameVerified: false,
       phone: "135****6681",
       level: "铂金会员",
       isLoggedIn: false,
@@ -202,6 +212,7 @@ export const initialState: AppState = {
       source: "小程序",
       createdAt: "2026-06-03 09:21",
       formValues: {
+        guestName: "赵明",
         withChildren: "否",
         childrenCount: "0",
         childrenAge: "",
@@ -221,6 +232,7 @@ export const initialState: AppState = {
       source: "小程序",
       createdAt: "2026-06-04 09:30",
       formValues: {
+        guestName: "林嘉怡",
         withChildren: "是",
         childrenCount: "1",
         childrenAge: "6 岁",

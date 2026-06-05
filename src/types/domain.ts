@@ -1,6 +1,8 @@
 export type Member = {
   memberId: string;
   name: string;
+  realName?: string;
+  isRealNameVerified?: boolean;
   phone: string;
   level: string;
   isLoggedIn: boolean;
