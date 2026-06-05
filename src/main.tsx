@@ -9,8 +9,6 @@ import {
   ClipboardList,
   Download,
   Home,
-  LogIn,
-  LogOut,
   QrCode,
   Settings,
   Share2,
@@ -18,7 +16,6 @@ import {
   Send,
   Ticket,
   UserCircle2,
-  UserRound,
   UsersRound,
   X,
 } from "lucide-react";
@@ -92,19 +89,6 @@ function App() {
   function notify(message: string, type: ToastType = "info") {
     setToast({ message, type });
     window.setTimeout(() => setToast(null), 2600);
-  }
-
-  function login() {
-    // TODO API: 获取当前登录会员，并用后端返回的会员身份覆盖本地登录态。
-    setState((current) => ({ ...current, member: { ...current.member, isLoggedIn: true } }));
-    notify("已模拟登录，会员信息来自登录态", "success");
-  }
-
-  function logout() {
-    setState((current) => ({ ...current, member: { ...current.member, isLoggedIn: false } }));
-    setClientPage("detail");
-    setSelectedSessionId(null);
-    notify("已退出模拟登录", "info");
   }
 
   async function copyShareLink() {
@@ -344,20 +328,14 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
             lastBooking={lastBooking}
             page={clientPage}
             setPage={setClientPage}
-            login={login}
-            logout={logout}
             selectSession={(sessionId) => {
               if (rule.loginRequired && !state.member.isLoggedIn) {
                 notify("请先登录会员账号后再预约", "error");
                 return;
               }
               const session = state.sessions.find((item) => item.sessionId === sessionId);
-              if (!session || !canClientBookSession(session, state.bookings)) {
-                notify("该场次当前不可预约", "error");
-                return;
-              }
+              if (!session) return;
               setSelectedSessionId(sessionId);
-              setClientPage("confirm");
             }}
             submitBooking={submitBooking}
             cancelBooking={cancelBooking}
@@ -439,8 +417,6 @@ function ClientShell(props: {
   lastBooking: Booking | null;
   page: ClientPage;
   setPage: (page: ClientPage) => void;
-  login: () => void;
-  logout: () => void;
   selectSession: (sessionId: string) => void;
   submitBooking: (noticeAccepted: boolean, formValues: Record<string, string>) => void;
   cancelBooking: (bookingId: string) => void;
@@ -458,14 +434,13 @@ function ClientShell(props: {
       <div className="min-h-[760px] bg-[#f7f8fa] pb-20">
         {props.page === "detail" && (
           <ClientBookingHome
-            member={props.state.member}
             exhibition={props.exhibition}
             rule={props.rule}
             sessions={props.sessions}
             bookings={props.state.bookings}
-            login={props.login}
-            logout={props.logout}
             selectSession={props.selectSession}
+            selectedSession={props.selectedSession}
+            setPage={props.setPage}
             shareActivity={props.shareActivity}
           />
         )}
@@ -473,8 +448,6 @@ function ClientShell(props: {
           <MiniProgramCenter
             member={props.state.member}
             bookings={myBookings}
-            login={props.login}
-            logout={props.logout}
             setPage={props.setPage}
             exhibitions={props.state.exhibitions}
             sessions={props.state.sessions}
@@ -601,8 +574,6 @@ function MiniProgramCenter(props: {
   bookings: Booking[];
   exhibitions: Exhibition[];
   sessions: ExhibitionSession[];
-  login: () => void;
-  logout: () => void;
   setPage: (page: ClientPage) => void;
 }) {
   const [voucherOpen, setVoucherOpen] = useState(false);
@@ -624,19 +595,11 @@ function MiniProgramCenter(props: {
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-sm text-slate-300">松赞会员</div>
-            <h2 className="mt-2 text-xl font-semibold">{props.member.isLoggedIn ? props.member.name : "游客"}</h2>
-            <p className="mt-1 text-sm text-slate-300">
-              {props.member.isLoggedIn ? `${props.member.level} · ${props.member.memberId}` : "登录后查看预约和签到状态"}
-            </p>
+            <h2 className="mt-2 text-xl font-semibold">{props.member.name}</h2>
+            <p className="mt-1 text-sm text-slate-300">{props.member.level} · {props.member.memberId}</p>
           </div>
           <UserCircle2 size={42} className="text-slate-300" />
         </div>
-        <button
-          onClick={props.member.isLoggedIn ? props.logout : props.login}
-          className="mt-5 h-10 w-full rounded-xl bg-white text-sm font-semibold text-slate-950"
-        >
-          {props.member.isLoggedIn ? "退出登录" : "模拟登录"}
-        </button>
       </section>
 
       {todayBooking && todayExhibition && todaySession && (
@@ -712,14 +675,13 @@ function CenterMenuItem({
 }
 
 function ClientBookingHome(props: {
-  member: AppState["member"];
   exhibition: Exhibition;
   rule: BookingRule;
   sessions: ExhibitionSession[];
   bookings: Booking[];
-  login: () => void;
-  logout: () => void;
   selectSession: (sessionId: string) => void;
+  selectedSession: ExhibitionSession | null;
+  setPage: (page: ClientPage) => void;
   shareActivity: () => void;
 }) {
   const bookingDates = useMemo(() => getSessionDates(props.sessions), [props.sessions]);
@@ -732,6 +694,26 @@ function ClientBookingHome(props: {
       setSelectedDate(bookingDates[0] ?? "");
     }
   }, [bookingDates, selectedDate]);
+
+  const selectedVisibleSession =
+    props.selectedSession && datePart(props.selectedSession.startTime) === selectedDate
+      ? props.selectedSession
+      : null;
+  const selectedStatus = selectedVisibleSession
+    ? displaySessionStatus(selectedVisibleSession, props.bookings, "client")
+    : null;
+  const selectedCanBook = selectedVisibleSession
+    ? canClientBookSession(selectedVisibleSession, props.bookings)
+    : false;
+  const submitButtonText = !selectedVisibleSession
+    ? "请选择场次"
+    : selectedStatus === "full"
+      ? "该场次已约满"
+      : selectedStatus === "ended"
+        ? "该场次已结束"
+        : selectedStatus === "pending"
+          ? "该场次未开放"
+          : "去报名";
 
   return (
     <div className="space-y-4 p-4">
@@ -753,7 +735,7 @@ function ClientBookingHome(props: {
         </div>
         <div className="p-4">
           <div className="mb-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-            {props.exhibition.status === "published" ? "预约开放中" : "未上架"}
+            {props.exhibition.status === "published" ? "报名进行中" : "未上架"}
           </div>
           <h2 className="text-2xl font-semibold leading-tight text-slate-950">{props.exhibition.title}</h2>
           <p className="mt-3 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
@@ -763,8 +745,8 @@ function ClientBookingHome(props: {
             value={formatRange(props.exhibition.exhibitionStartTime, props.exhibition.exhibitionEndTime)}
           />
           <InfoRow
-            label="预约开放"
-            value={formatRange(props.exhibition.bookingStartTime, props.exhibition.bookingEndTime)}
+            label="报名截止时间"
+            value={props.exhibition.bookingEndTime}
           />
         </div>
       </section>
@@ -819,37 +801,14 @@ function ClientBookingHome(props: {
         ) : (
           <div className="space-y-3">
             {selectedSessions.map((session) => (
-              <SessionCard key={session.sessionId} session={session} bookings={props.bookings} selectSession={props.selectSession} />
+              <SessionCard
+                key={session.sessionId}
+                session={session}
+                bookings={props.bookings}
+                selected={selectedVisibleSession?.sessionId === session.sessionId}
+                selectSession={props.selectSession}
+              />
             ))}
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-2xl bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
-          <UserRound size={18} />
-          当前会员
-        </div>
-        {props.member.isLoggedIn ? (
-          <div className="space-y-2 text-sm">
-            <ReadonlyField label="会员ID" value={props.member.memberId} />
-            <ReadonlyField label="姓名" value={props.member.name} />
-            <ReadonlyField label="手机号" value={props.member.phone} />
-            <ReadonlyField label="会员等级" value={props.member.level} />
-            <p className="rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
-              身份信息来自登录态，仅展示不可编辑。预约仅限会员本人，人数固定为 1。
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-slate-300 p-4 text-center">
-            <p className="mb-3 text-sm text-slate-600">登录后才可预约，Demo 使用模拟登录态。</p>
-            <button
-              onClick={props.login}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
-            >
-              <LogIn size={16} />
-              模拟登录
-            </button>
           </div>
         )}
       </section>
@@ -879,30 +838,18 @@ function ClientBookingHome(props: {
       </section>
 
       <div className="sticky bottom-0 -mx-4 bg-white/90 p-4 backdrop-blur">
-        <div className="flex gap-2">
-          {props.member.isLoggedIn && (
-            <button
-              onClick={props.logout}
-              className="inline-flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 text-slate-600"
-              title="退出登录"
-            >
-              <LogOut size={18} />
-            </button>
-          )}
-          {props.member.isLoggedIn ? (
-            <div className="flex h-12 flex-1 items-center justify-center rounded-xl bg-slate-950 text-sm font-semibold text-white">
-              请选择日期和场次预约
-            </div>
-          ) : (
-            <button
-              onClick={props.login}
-              className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white"
-            >
-              <LogIn size={16} />
-              模拟登录后预约
-            </button>
-          )}
-        </div>
+        <button
+          disabled={!selectedCanBook}
+          onClick={() => {
+            if (!selectedCanBook) return;
+            props.setPage("confirm");
+          }}
+          className={`flex h-12 w-full items-center justify-center rounded-xl text-sm font-semibold ${
+            selectedCanBook ? "bg-slate-950 text-white" : "bg-slate-200 text-slate-500"
+          }`}
+        >
+          {submitButtonText}
+        </button>
       </div>
     </div>
   );
@@ -911,32 +858,42 @@ function ClientBookingHome(props: {
 function SessionCard({
   session,
   bookings,
+  selected,
   selectSession,
 }: {
   session: ExhibitionSession;
   bookings: Booking[];
+  selected: boolean;
   selectSession: (sessionId: string) => void;
 }) {
   const displayStatus = displaySessionStatus(session, bookings, "client");
-  const disabled = !canClientBookSession(session, bookings);
+  const unavailable = !canClientBookSession(session, bookings);
+  const active = selected && !unavailable;
   const remain = publicRemainingStock(session, bookings);
   return (
     <button
-      disabled={disabled}
       onClick={() => selectSession(session.sessionId)}
-      className={`w-full rounded-2xl border p-4 text-left transition ${disabled ? "border-slate-200 bg-slate-50 opacity-60" : "border-slate-950 bg-white hover:-translate-y-0.5"}`}
+      className={`w-full rounded-2xl border p-4 text-left transition ${
+        active
+          ? "border-slate-950 bg-slate-950 text-white shadow-sm"
+          : unavailable
+            ? `border-slate-200 bg-slate-50 opacity-60 ${selected ? "ring-2 ring-slate-300" : ""}`
+            : "border-slate-950 bg-white hover:-translate-y-0.5"
+      }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-slate-950">{session.sessionName}</div>
-          <div className="mt-1 text-sm text-slate-600">{timePart(session.startTime)} - {timePart(session.endTime)}</div>
+          <div className={`text-sm font-semibold ${active ? "text-white" : "text-slate-950"}`}>{session.sessionName}</div>
+          <div className={`mt-1 text-sm ${active ? "text-slate-300" : "text-slate-600"}`}>
+            {timePart(session.startTime)} - {timePart(session.endTime)}
+          </div>
         </div>
         <StatusPill status={displayStatus} />
       </div>
-      <div className="mt-4 grid grid-cols-3 rounded-xl bg-slate-50 p-3 text-center text-xs">
+      <div className={`mt-4 grid grid-cols-3 rounded-xl p-3 text-center text-xs ${active ? "bg-white/10" : "bg-slate-50"}`}>
         <div className="col-span-3">
-          <div className="text-2xl font-semibold text-slate-950">{remain}</div>
-          <div className="mt-1 text-slate-500">剩余名额</div>
+          <div className={`text-2xl font-semibold ${active ? "text-white" : "text-slate-950"}`}>{remain}</div>
+          <div className={`mt-1 ${active ? "text-slate-300" : "text-slate-500"}`}>剩余名额</div>
         </div>
       </div>
     </button>
@@ -1093,9 +1050,9 @@ function ConfirmBooking(props: {
 
   return (
     <div className="space-y-4 p-4">
-      <h2 className="text-lg font-semibold text-slate-950">确认预约</h2>
+      <h2 className="text-lg font-semibold text-slate-950">确认报名</h2>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
-        <div className="mb-3 text-sm font-semibold text-slate-950">预约人信息</div>
+        <div className="mb-3 text-sm font-semibold text-slate-950">报名人信息</div>
         <ReadonlyField label="会员ID" value={props.member.memberId} />
         <ReadonlyField label="姓名" value={props.member.name} />
         <ReadonlyField label="手机号" value={props.member.phone} />
@@ -1105,7 +1062,7 @@ function ConfirmBooking(props: {
         </p>
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
-        <div className="mb-3 text-sm font-semibold text-slate-950">预约内容</div>
+        <div className="mb-3 text-sm font-semibold text-slate-950">报名内容</div>
         <InfoRow label="活动" value={props.exhibition.title} />
         <InfoRow label="地点" value={props.exhibition.location} />
         <InfoRow label="场次" value={formatRange(props.session.startTime, props.session.endTime)} />
@@ -1143,7 +1100,7 @@ function ConfirmBooking(props: {
         onClick={() => props.submitBooking(accepted, formValues)}
         className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
       >
-        提交预约
+        提交报名
       </button>
     </div>
   );
