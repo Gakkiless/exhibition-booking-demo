@@ -67,6 +67,8 @@ export const initialState: AppState = {
       sharePosterDesc: "会员专属报名通道，扫码进入松赞小程序查看活动详情。",
       description:
         "以装置、影像与交互媒介呈现城市更新中的空间记忆。活动设置限流报名，会员凭报名码入场。",
+      detailedDescription:
+        "本活动采用分场次报名入场。会员完成报名后将在小程序内获得报名码和二维码占位凭证，现场由员工端扫描客人手机里的报名凭证完成签到。展陈内容围绕城市空间更新、公共记忆与当代媒介展开，适合会员与亲友按场次到场体验。",
       location: "上海市徐汇区西岸艺术中心 A 馆",
       exhibitionStartTime: "2026-06-20 10:00",
       exhibitionEndTime: "2026-07-20 20:00",
@@ -91,6 +93,8 @@ export const initialState: AppState = {
       sharePosterTitle: "材料与光：设计实验展",
       sharePosterDesc: "报名设计导览，体验材料与光影实验。",
       description: "展示新材料、灯光与零售空间设计的实验样本。",
+      detailedDescription:
+        "活动以设计师导览和材料样本体验为主，结合灯光、陈列与零售空间案例，帮助会员理解材料选择与空间氛围之间的关系。",
       location: "上海市静安区创意园 2 号馆",
       exhibitionStartTime: "2026-08-05 09:30",
       exhibitionEndTime: "2026-08-18 18:30",
