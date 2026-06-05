@@ -66,7 +66,7 @@ export type Booking = {
   memberLevel: string;
   bookingCount: 1;
   status: BookingStatus;
-  source: "小程序" | "后台" | "销售代客预约";
+  source: "小程序" | "后台" | "销售代客报名";
   createdAt: string;
   formValues?: Record<string, string>;
   salesUserId?: string;

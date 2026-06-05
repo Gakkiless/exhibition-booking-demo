@@ -18,7 +18,7 @@ export function internalBookedCount(bookings: Booking[], sessionId: string) {
   return bookings.filter(
     (booking) =>
       booking.sessionId === sessionId &&
-      booking.source === "销售代客预约" &&
+      booking.source === "销售代客报名" &&
       activeBookingStatuses.includes(booking.status),
   ).length;
 }
@@ -52,7 +52,7 @@ export function displaySessionStatus(session: ExhibitionSession, bookings?: Book
 export function statusText(status: SessionStatus) {
   const map: Record<SessionStatus, string> = {
     pending: "未开放",
-    open: "可预约",
+    open: "可报名",
     full: "已约满",
     ended: "已结束",
   };
@@ -108,21 +108,21 @@ type ValidationInput = {
 export function validateBooking(input: ValidationInput): string | null {
   const { member, exhibition, rule, session, bookings, noticeAccepted, channel = "client" } = input;
 
-  if (rule.loginRequired && !member.isLoggedIn) return "请先登录会员账号后再预约";
-  if (exhibition.status !== "published") return "当前活动未上架，暂不可预约";
+  if (rule.loginRequired && !member.isLoggedIn) return "请先登录会员账号后再报名";
+  if (exhibition.status !== "published") return "当前活动未上架，暂不可报名";
   if (rule.selfOnly && (!member.memberId || !member.name || !member.phone)) {
-    return "预约人信息必须来自当前登录会员";
+    return "报名人信息必须来自当前登录会员";
   }
-  if (rule.fixedBookingCount !== 1) return "当前 Demo 仅支持本人单人预约";
+  if (rule.fixedBookingCount !== 1) return "当前 Demo 仅支持本人单人报名";
   if (rule.oneSessionPerMember && hasActiveBookingForExhibition(bookings, exhibition.exhibitionId, member.memberId)) {
-    return "当前活动限制每位会员只能预约一个场次";
+    return "当前活动限制每位会员只能报名一个场次";
   }
   if (channel === "sales") {
-    if (!canSalesBookSession(session, bookings)) return `该场次${statusText(displaySessionStatus(session))}，销售不可继续代约`;
+    if (!canSalesBookSession(session, bookings)) return `该场次${statusText(displaySessionStatus(session))}，销售不可继续代报名`;
   } else if (!canClientBookSession(session, bookings)) {
-    return `该场次${statusText(displaySessionStatus(session, bookings, "client"))}，不可预约`;
+    return `该场次${statusText(displaySessionStatus(session, bookings, "client"))}，不可报名`;
   }
-  if (!noticeAccepted) return "请先勾选并确认预约须知";
+  if (!noticeAccepted) return "请先勾选并确认报名须知";
   return null;
 }
 

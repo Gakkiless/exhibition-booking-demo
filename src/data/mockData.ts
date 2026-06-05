@@ -54,16 +54,16 @@ export const initialState: AppState = {
       sharePosterImage:
         "https://images.unsplash.com/photo-1545987796-200677ee1011?auto=format&fit=crop&w=1200&q=80",
       sharePosterTitle: "流动的城市：当代艺术沉浸展",
-      sharePosterDesc: "会员专属预约通道，扫码进入松赞小程序查看活动详情。",
+      sharePosterDesc: "会员专属报名通道，扫码进入松赞小程序查看活动详情。",
       description:
-        "以装置、影像与交互媒介呈现城市更新中的空间记忆。活动设置限流预约，会员凭预约码入场。",
+        "以装置、影像与交互媒介呈现城市更新中的空间记忆。活动设置限流报名，会员凭报名码入场。",
       location: "上海市徐汇区西岸艺术中心 A 馆",
       exhibitionStartTime: "2026-06-20 10:00",
       exhibitionEndTime: "2026-07-20 20:00",
       bookingStartTime: "2026-06-01 10:00",
       bookingEndTime: "2026-07-19 18:00",
       notice:
-        "请按预约场次提前 15 分钟到场。预约仅限会员本人使用，不可转让。入场需出示小程序预约凭证与会员身份信息。",
+        "请按报名场次提前 15 分钟到场。报名仅限会员本人使用，不可转让。入场需出示小程序报名凭证与会员身份信息。",
       bookingFields: [
         { fieldId: "withChildren", label: "是否带儿童", required: true },
         { fieldId: "childrenCount", label: "儿童人数", required: false },
@@ -79,7 +79,7 @@ export const initialState: AppState = {
       sharePosterImage:
         "https://images.unsplash.com/photo-1531058020387-3be344556be6?auto=format&fit=crop&w=1200&q=80",
       sharePosterTitle: "材料与光：设计实验展",
-      sharePosterDesc: "预约设计导览，体验材料与光影实验。",
+      sharePosterDesc: "报名设计导览，体验材料与光影实验。",
       description: "展示新材料、灯光与零售空间设计的实验样本。",
       location: "上海市静安区创意园 2 号馆",
       exhibitionStartTime: "2026-08-05 09:30",

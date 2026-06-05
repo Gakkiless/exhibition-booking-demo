@@ -145,13 +145,13 @@ function App() {
     const targetSession = state.sessions.find((item) => item.sessionId === input.sessionId);
 
     if (!targetExhibition || !targetRule || !targetSession) {
-      notify("预约数据不完整，请重新选择活动和场次", "error");
+      notify("报名数据不完整，请重新选择活动和场次", "error");
       return null;
     }
 
-    // TODO API: 真实后端应统一校验会员、销售权限、预约规则和实时库存，并返回最终预约结果。
+    // TODO API: 真实后端应统一校验会员、销售权限、报名规则和实时库存，并返回最终报名结果。
     const validationMember =
-      input.source === "销售代客预约" ? { ...input.member, isLoggedIn: true } : input.member;
+      input.source === "销售代客报名" ? { ...input.member, isLoggedIn: true } : input.member;
     const error = validateBooking({
       member: validationMember,
       exhibition: targetExhibition,
@@ -159,7 +159,7 @@ function App() {
       session: targetSession,
       bookings: state.bookings,
       noticeAccepted: true,
-      channel: input.source === "销售代客预约" ? "sales" : "client",
+      channel: input.source === "销售代客报名" ? "sales" : "client",
     });
     if (error) {
       notify(error, "error");
@@ -190,7 +190,7 @@ function App() {
     setState((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
-        session.sessionId === targetSession.sessionId && input.source !== "销售代客预约"
+        session.sessionId === targetSession.sessionId && input.source !== "销售代客报名"
           ? { ...session, bookedCount: Math.min(session.bookedCount + 1, session.totalStock) }
           : session,
       ),
@@ -203,7 +203,7 @@ function App() {
 function submitBooking(noticeAccepted: boolean, formValues: Record<string, string>) {
     if (!selectedSession) return;
     if (!noticeAccepted) {
-      notify("请先勾选并确认预约须知", "error");
+      notify("请先勾选并确认报名须知", "error");
       return;
     }
     const missingFields = missingRequiredBookingFields(exhibition, formValues);
@@ -221,7 +221,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     });
     if (!booking) return;
     setClientPage("success");
-    notify("预约成功，已生成入场凭证", "success");
+    notify("报名成功，已生成入场凭证", "success");
   }
 
   function cancelBooking(bookingId: string) {
@@ -229,30 +229,30 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     if (!booking) return;
     const matchedRule = state.rules.find((item) => item.exhibitionId === booking.exhibitionId);
     if (!matchedRule?.allowCancel) {
-      notify("该活动不允许取消预约", "error");
+      notify("该活动不允许取消报名", "error");
       return;
     }
     if (booking.status !== "pending_checkin") {
-      notify("只有待签到预约可以取消", "error");
+      notify("只有待签到报名可以取消", "error");
       return;
     }
-    // TODO API: 调用取消预约接口，由后端释放库存并返回最新场次库存。
+    // TODO API: 调用取消报名接口，由后端释放库存并返回最新场次库存。
     setState((current) => ({
       ...current,
       bookings: current.bookings.map((item) =>
         item.bookingId === bookingId ? { ...item, status: "cancelled", cancelledAt: nowText() } : item,
       ),
       sessions: current.sessions.map((session) =>
-        session.sessionId === booking.sessionId && booking.source !== "销售代客预约"
+        session.sessionId === booking.sessionId && booking.source !== "销售代客报名"
           ? { ...session, bookedCount: Math.max(session.bookedCount - booking.bookingCount, 0) }
           : session,
       ),
     }));
-    notify("预约已取消，库存已释放", "success");
+    notify("报名已取消，库存已释放", "success");
   }
 
   function checkInBooking(bookingId: string) {
-    // TODO API: 调用签到接口，真实场景需校验预约码、场次时间和后台操作权限。
+    // TODO API: 调用签到接口，真实场景需校验报名码、场次时间和后台操作权限。
     const signedAt = nowText();
     setState((current) => ({
       ...current,
@@ -262,7 +262,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
           : booking,
       ),
     }));
-    notify("已模拟签到该预约", "success");
+    notify("已模拟签到该报名", "success");
   }
 
   function updateExhibition(next: Exhibition) {
@@ -277,12 +277,12 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
   }
 
   function updateRule(next: BookingRule) {
-    // TODO API: 保存 B 端预约规则配置。
+    // TODO API: 保存 B 端报名规则配置。
     setState((current) => ({
       ...current,
       rules: current.rules.map((item) => (item.exhibitionId === next.exhibitionId ? next : item)),
     }));
-    notify("预约规则已保存，C 端校验已同步", "success");
+    notify("报名规则已保存，C 端校验已同步", "success");
   }
 
   function updateSession(next: ExhibitionSession) {
@@ -305,12 +305,12 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
       member,
       exhibitionId,
       sessionId,
-      source: "销售代客预约",
+      source: "销售代客报名",
       formValues,
       salesUser: activeSalesUser,
     });
     if (!booking) return false;
-    notify(`已为 ${member.name} 完成代客预约`, "success");
+    notify(`已为 ${member.name} 完成代客报名`, "success");
     return true;
   }
 
@@ -330,7 +330,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
             setPage={setClientPage}
             selectSession={(sessionId) => {
               if (rule.loginRequired && !state.member.isLoggedIn) {
-                notify("请先登录会员账号后再预约", "error");
+                notify("请先登录会员账号后再报名", "error");
                 return;
               }
               const session = state.sessions.find((item) => item.sessionId === sessionId);
@@ -387,7 +387,7 @@ function TopNav({
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
         <div>
           <div className="text-sm text-slate-500">Demo</div>
-          <h1 className="text-lg font-semibold text-slate-950">线下活动预约报名</h1>
+          <h1 className="text-lg font-semibold text-slate-950">线下活动报名</h1>
         </div>
         <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
           <button
@@ -485,7 +485,7 @@ function ClientShell(props: {
 
 function ClientBottomTabs({ page, setPage }: { page: ClientPage; setPage: (page: ClientPage) => void }) {
   const tabs: Array<{ key: ClientPage; label: string; icon: React.ElementType }> = [
-    { key: "detail", label: "活动预约demo页", icon: Home },
+    { key: "detail", label: "活动报名demo页", icon: Home },
     { key: "center", label: "小程序个人中心", icon: UserCircle2 },
   ];
   return (
@@ -619,7 +619,7 @@ function MiniProgramCenter(props: {
             className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white"
           >
             <QrCode size={16} />
-            查看预约凭证二维码
+            查看报名凭证二维码
           </button>
         </section>
       )}
@@ -627,8 +627,8 @@ function MiniProgramCenter(props: {
       <section className="rounded-2xl bg-white p-2 shadow-sm">
         <CenterMenuItem
           icon={<Ticket size={18} />}
-          title="我的预约"
-          desc="查看预约凭证、取消预约和签到状态"
+          title="我的报名"
+          desc="查看报名凭证、取消报名和签到状态"
           onClick={() => props.setPage("my")}
         />
       </section>
@@ -636,7 +636,7 @@ function MiniProgramCenter(props: {
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="text-sm font-semibold text-slate-950">Demo 说明</div>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          本页模拟松赞小程序个人中心。会员预约后在这里出示活动凭证，到场后由员工端扫描客人手机里的预约凭证完成签到。
+          本页模拟松赞小程序个人中心。会员报名后在这里出示活动凭证，到场后由员工端扫描客人手机里的报名凭证完成签到。
         </p>
       </section>
       {voucherOpen && todayBooking && todayExhibition && todaySession && (
@@ -755,7 +755,7 @@ function ClientBookingHome(props: {
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
             <CalendarDays size={18} />
-            选择预约日期
+            选择报名日期
           </div>
           <button
             onClick={() => setCalendarOpen(true)}
@@ -793,7 +793,7 @@ function ClientBookingHome(props: {
 
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-950">{selectedDate ? `${formatDateLabel(selectedDate)} 场次` : "预约场次"}</h3>
+          <h3 className="text-sm font-semibold text-slate-950">{selectedDate ? `${formatDateLabel(selectedDate)} 场次` : "报名场次"}</h3>
           <span className="text-xs text-slate-500">库存实时联动后台</span>
         </div>
         {selectedSessions.length === 0 ? (
@@ -816,7 +816,7 @@ function ClientBookingHome(props: {
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-2 text-sm font-semibold text-slate-950">活动详细介绍</div>
         <p className="text-sm leading-6 text-slate-600">
-          本活动采用分场次预约入场。会员完成预约后将在小程序内获得预约码和二维码占位凭证，现场由员工端扫描客人手机里的预约凭证完成签到。
+          本活动采用分场次报名入场。会员完成报名后将在小程序内获得报名码和二维码占位凭证，现场由员工端扫描客人手机里的报名凭证完成签到。
         </p>
         <p className="mt-2 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
       </section>
@@ -828,12 +828,12 @@ function ClientBookingHome(props: {
         </div>
         <p className="text-sm leading-6 text-slate-600">{props.exhibition.notice}</p>
         <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
-          <BadgeText text={props.rule.loginRequired ? "必须登录" : "可游客预约"} />
-          <BadgeText text={props.rule.selfOnly ? "仅限本人" : "允许代约"} />
-          <BadgeText text="人数固定 1 人" />
-          <BadgeText text={props.rule.oneSessionPerMember ? "限约一场" : "可约多场"} />
+          <BadgeText text={props.rule.loginRequired ? "必须登录" : "可游客报名"} />
+          <BadgeText text={props.rule.selfOnly ? "仅限本人" : "允许代报名"} />
+          <BadgeText text="仅限1人" />
+          <BadgeText text={props.rule.oneSessionPerMember ? "限报一场" : "可报多场"} />
           <BadgeText text={props.rule.allowCancel ? `可取消，截止前 ${props.rule.cancelDeadlineHours} 小时` : "不可取消"} />
-          <BadgeText text="约满不可预约" />
+          <BadgeText text="约满不可报名" />
         </div>
       </section>
 
@@ -951,7 +951,7 @@ function CalendarSheet({
       <section className="w-full max-w-[398px] rounded-2xl bg-white p-4 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold text-slate-950">选择预约日期</div>
+            <div className="text-sm font-semibold text-slate-950">选择报名日期</div>
             <div className="mt-1 text-xs text-slate-500">{baseDate.slice(0, 7).replace("-", " 年 ")} 月</div>
           </div>
           <button onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500">
@@ -982,7 +982,7 @@ function CalendarSheet({
             );
           })}
         </div>
-        <p className="mt-3 text-xs leading-5 text-slate-500">只有配置了预约场次的日期可以点击，点击后会展示当日场次与实时剩余库存。</p>
+        <p className="mt-3 text-xs leading-5 text-slate-500">只有配置了报名场次的日期可以点击，点击后会展示当日场次与实时剩余库存。</p>
       </section>
     </div>
   );
@@ -1056,16 +1056,16 @@ function ConfirmBooking(props: {
         <ReadonlyField label="会员ID" value={props.member.memberId} />
         <ReadonlyField label="姓名" value={props.member.name} />
         <ReadonlyField label="手机号" value={props.member.phone} />
-        <ReadonlyField label="预约人数" value="1 人" />
+        <ReadonlyField label="报名人数" value="仅限1人" />
         <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-800">
-          不支持填写其他人姓名、修改手机号或选择多人；本预约凭证仅限当前会员本人使用。
+          不支持填写其他人姓名、修改手机号或选择多人；本报名凭证仅限当前会员本人使用。
         </p>
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-3 text-sm font-semibold text-slate-950">报名内容</div>
         <InfoRow label="活动" value={props.exhibition.title} />
         <InfoRow label="地点" value={props.exhibition.location} />
-        <InfoRow label="场次" value={formatRange(props.session.startTime, props.session.endTime)} />
+        <InfoRow label="场次" value={`${props.session.sessionName} · ${formatRange(props.session.startTime, props.session.endTime)}`} />
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-3 text-sm font-semibold text-slate-950">客人补充信息</div>
@@ -1094,7 +1094,7 @@ function ConfirmBooking(props: {
           checked={accepted}
           onChange={(event) => setAccepted(event.target.checked)}
         />
-        <span>我已阅读并同意预约须知：{props.exhibition.notice}</span>
+        <span>我已阅读并同意报名须知：{props.exhibition.notice}</span>
       </label>
       <button
         onClick={() => props.submitBooking(accepted, formValues)}
@@ -1121,7 +1121,7 @@ function SuccessPage({
     <div className="space-y-4 p-4">
       <section className="rounded-2xl bg-white p-5 text-center shadow-sm">
         <CheckCircle2 className="mx-auto text-emerald-600" size={48} />
-        <h2 className="mt-3 text-xl font-semibold text-slate-950">预约成功</h2>
+        <h2 className="mt-3 text-xl font-semibold text-slate-950">报名成功</h2>
         <p className="mt-1 text-sm text-slate-500">请在入场时出示以下凭证</p>
         <div className="mx-auto mt-5 flex h-36 w-36 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
           <QrCode size={78} className="text-slate-400" />
@@ -1132,19 +1132,19 @@ function SuccessPage({
       </section>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <InfoRow label="活动名称" value={exhibition.title} />
-        <InfoRow label="场次时间" value={formatRange(session.startTime, session.endTime)} />
+        <InfoRow label="场次" value={`${session.sessionName} · ${formatRange(session.startTime, session.endTime)}`} />
         <InfoRow label="活动地点" value={exhibition.location} />
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
         <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
-          入场须知：预约码仅限会员本人使用，请按场次到场。二维码为 Demo 占位，后续可接入真实凭证生成与签到接口。
+          入场须知：报名码仅限会员本人使用，请按场次到场。二维码为 Demo 占位，后续可接入真实凭证生成与签到接口。
         </p>
       </section>
       <button
         onClick={() => setPage("my")}
         className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
       >
-        查看我的预约
+        查看我的报名
       </button>
     </div>
   );
@@ -1166,7 +1166,7 @@ function BookingVoucherModal({
       <section className="w-full max-w-[398px] rounded-3xl bg-white p-5 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold text-slate-950">预约凭证二维码</div>
+            <div className="text-sm font-semibold text-slate-950">报名凭证二维码</div>
             <div className="mt-1 text-xs text-slate-500">请向现场员工出示此凭证</div>
           </div>
           <button onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500">
@@ -1184,11 +1184,11 @@ function BookingVoucherModal({
         </div>
         <div className="mt-4 rounded-2xl border border-slate-100 p-4">
         <InfoRow label="活动名称" value={exhibition.title} />
-        <InfoRow label="场次时间" value={formatRange(session.startTime, session.endTime)} />
+        <InfoRow label="场次" value={`${session.sessionName} · ${formatRange(session.startTime, session.endTime)}`} />
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
         <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
-          Demo 中二维码为占位图。真实项目中员工端扫描该凭证后，由后台校验预约码并写入签到状态。
+          Demo 中二维码为占位图。真实项目中员工端扫描该凭证后，由后台校验报名码并写入签到状态。
         </p>
         </div>
       <button onClick={onClose} className="mt-4 h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
@@ -1207,10 +1207,10 @@ function MyBookings(props: {
 }) {
   return (
     <div className="space-y-3 p-4">
-      <h2 className="text-lg font-semibold text-slate-950">我的预约</h2>
+      <h2 className="text-lg font-semibold text-slate-950">我的报名</h2>
       {props.bookings.length === 0 && (
         <div className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
-          暂无当前会员预约记录
+          暂无当前会员报名记录
         </div>
       )}
       {props.bookings.map((booking) => {
@@ -1243,7 +1243,7 @@ function MyBookings(props: {
                 onClick={() => props.cancelBooking(booking.bookingId)}
                 className="flex-1 rounded-xl bg-slate-950 py-2 text-sm font-medium text-white disabled:bg-slate-200 disabled:text-slate-500"
               >
-                取消预约
+                取消报名
               </button>
             </div>
           </section>
@@ -1312,7 +1312,7 @@ function AdminShell(props: {
           ["config", "活动配置", Settings],
           ["sessions", "场次管理", CalendarDays],
           ["bookings", "报名名单", Ticket],
-          ...(props.adminRole === "sales" ? [["assist", "代客预约", UsersRound]] : []),
+          ...(props.adminRole === "sales" ? [["assist", "代客报名", UsersRound]] : []),
         ].map(([key, label, Icon]) => (
           <button
             key={key as string}
@@ -1395,7 +1395,7 @@ function Dashboard({
       totalStock,
       booked,
       remain: totalStock - booked,
-      assisted: bookings.filter((item) => item.source === "销售代客预约").length,
+      assisted: bookings.filter((item) => item.source === "销售代客报名").length,
       signed: bookings.filter((item) => Boolean(item.signedInAt)).length,
       cancelled: bookings.filter((item) => item.status === "cancelled").length,
     };
@@ -1409,14 +1409,14 @@ function Dashboard({
       >
         <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <AdminMetric label="总库存/对外库存" value={stats.totalStock} />
-        <AdminMetric label="客用已预约人数" value={stats.booked} />
+        <AdminMetric label="客用已报名人数" value={stats.booked} />
         <AdminMetric label="客用剩余库存" value={stats.remain} />
-        <AdminMetric label="内部代预约人数" value={stats.assisted} />
+        <AdminMetric label="内部代报名人数" value={stats.assisted} />
         <AdminMetric label="签到人数" value={stats.signed} />
         <AdminMetric label="取消人数" value={stats.cancelled} />
         </div>
       </Panel>
-      <Panel title="各场次预约情况">
+      <Panel title="各场次报名情况">
         <div className="space-y-4">
           {sessions.map((session) => {
             const percent = session.totalStock ? Math.round((session.bookedCount / session.totalStock) * 100) : 0;
@@ -1429,7 +1429,7 @@ function Dashboard({
                 <div className="mb-2 flex items-center justify-between text-sm">
                   <span className="font-medium text-slate-700">{session.sessionName}</span>
                   <span className="text-slate-500">
-                    客用预约 {session.bookedCount}/{session.totalStock} · 内部代约 {assisted} · 签到 {signed}
+                    客用报名 {session.bookedCount}/{session.totalStock} · 内部代报名 {assisted} · 签到 {signed}
                   </span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-slate-100">
@@ -1511,19 +1511,19 @@ function AssistedBookingPage(props: {
       return;
     }
     if (!selectedSession) {
-      setMessage("请先选择可预约场次");
+      setMessage("请先选择可报名场次");
       return;
     }
     if (selectedExhibition.status !== "published") {
-      setMessage("该活动未上架，销售不可代客预约");
+      setMessage("该活动未上架，销售不可代客报名");
       return;
     }
     if (!canSalesBookSession(selectedSession, props.bookings)) {
-      setMessage(`该场次${statusText(displaySessionStatus(selectedSession, props.bookings, "sales"))}，销售不可代约`);
+      setMessage(`该场次${statusText(displaySessionStatus(selectedSession, props.bookings, "sales"))}，销售不可代报名`);
       return;
     }
     if (activeBookingBlocked) {
-      setMessage("该活动限制每位会员只能预约一个场次，该会员已有有效预约");
+      setMessage("该活动限制每位会员只能报名一个场次，该会员已有有效报名");
       return;
     }
     const missingFields = missingRequiredBookingFields(selectedExhibition, formValues);
@@ -1533,14 +1533,14 @@ function AssistedBookingPage(props: {
     }
     const ok = props.assistBooking(selectedMember, selectedExhibition.exhibitionId, selectedSession.sessionId, formValues);
     if (ok) {
-      setMessage(`代客预约成功：${selectedMember.name} · ${selectedSession.sessionName}`);
+      setMessage(`代客报名成功：${selectedMember.name} · ${selectedSession.sessionName}`);
       setSelectedSessionId("");
     }
   }
 
   return (
     <div className="space-y-5">
-      <Panel title="销售代客预约">
+      <Panel title="销售代客报名">
         <div className="grid gap-5 xl:grid-cols-[1fr_1.2fr]">
           <section className="space-y-4">
             <div className="rounded-xl bg-slate-50 p-4">
@@ -1593,7 +1593,7 @@ function AssistedBookingPage(props: {
                   ))}
                 </select>
               </label>
-              <ReadonlyField label="预约人数" value="固定 1 人" />
+              <ReadonlyField label="报名人数" value="仅限1人" />
             </div>
 
             {selectedMember && (
@@ -1647,7 +1647,7 @@ function AssistedBookingPage(props: {
                         <span className="rounded-full bg-white/20 px-2 py-1 text-xs">{statusText(displayStatus)}</span>
                       </div>
                       <div className="mt-3 text-xs opacity-75">
-                        内部已代约 {internalBookedCount(props.bookings, session.sessionId)} 人 · 不占用客用库存
+                        内部已代报名 {internalBookedCount(props.bookings, session.sessionId)} 人 · 不占用客用库存
                       </div>
                     </button>
                   );
@@ -1679,16 +1679,16 @@ function AssistedBookingPage(props: {
             )}
 
             <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-              规则提示：销售代客预约仅可选择现有会员，不占用 C 端客用总库存，也不会影响客人看到的剩余名额；仍遵守活动上架、场次状态和每会员限约一场规则。
+              规则提示：销售代客报名仅可选择现有会员，不占用 C 端客用总库存，也不会影响客人看到的剩余名额；仍遵守活动上架、场次状态和每会员限约一场规则。
               {activeBookingBlocked && (
-                <div className="mt-2 font-semibold text-rose-700">该会员已有有效预约，当前规则禁止再次预约。</div>
+                <div className="mt-2 font-semibold text-rose-700">该会员已有有效报名，当前规则禁止再次报名。</div>
               )}
               {message && <div className="mt-2 font-semibold text-slate-950">{message}</div>}
             </div>
 
             <div className="flex flex-wrap gap-2">
               <button onClick={submitAssistedBooking} className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
-                提交代客预约
+                提交代客报名
               </button>
             </div>
           </section>
@@ -1713,8 +1713,8 @@ function ActivityList(props: {
             <Th>活动名称</Th>
             <Th>活动地点</Th>
             <Th>活动时间</Th>
-            <Th>预约状态</Th>
-            <Th>总预约人数</Th>
+            <Th>报名状态</Th>
+            <Th>总报名人数</Th>
             <Th>操作</Th>
           </tr>
         </thead>
@@ -1772,10 +1772,10 @@ function ConfigPage(props: {
           <div className="grid gap-3 md:grid-cols-2">
             <TextInput label="活动开始时间" value={draft.exhibitionStartTime} onChange={(exhibitionStartTime) => setDraft({ ...draft, exhibitionStartTime })} />
             <TextInput label="活动结束时间" value={draft.exhibitionEndTime} onChange={(exhibitionEndTime) => setDraft({ ...draft, exhibitionEndTime })} />
-            <TextInput label="预约开始时间" value={draft.bookingStartTime} onChange={(bookingStartTime) => setDraft({ ...draft, bookingStartTime })} />
-            <TextInput label="预约结束时间" value={draft.bookingEndTime} onChange={(bookingEndTime) => setDraft({ ...draft, bookingEndTime })} />
+            <TextInput label="报名开始时间" value={draft.bookingStartTime} onChange={(bookingStartTime) => setDraft({ ...draft, bookingStartTime })} />
+            <TextInput label="报名截止时间" value={draft.bookingEndTime} onChange={(bookingEndTime) => setDraft({ ...draft, bookingEndTime })} />
           </div>
-          <TextArea label="预约须知" value={draft.notice} onChange={(notice) => setDraft({ ...draft, notice })} />
+          <TextArea label="报名须知" value={draft.notice} onChange={(notice) => setDraft({ ...draft, notice })} />
           <div className="rounded-xl border border-slate-200 p-4">
             <div className="mb-3 text-sm font-semibold text-slate-950">小程序分享海报配置</div>
             <div className="grid gap-3">
@@ -1800,7 +1800,7 @@ function ConfigPage(props: {
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-slate-950">客人填写信息配置</div>
-                <div className="mt-1 text-xs text-slate-500">全部字段在 C 端和销售代约页展示为文本输入框</div>
+                <div className="mt-1 text-xs text-slate-500">全部字段在 C 端和销售代报名页展示为文本输入框</div>
               </div>
               <button
                 type="button"
@@ -1875,20 +1875,20 @@ function ConfigPage(props: {
           </button>
         </div>
       </Panel>
-      <Panel title="预约规则配置">
+      <Panel title="报名规则配置">
         <div className="space-y-3">
           <ToggleRow label="必须登录" checked={ruleDraft.loginRequired} onChange={(loginRequired) => setRuleDraft({ ...ruleDraft, loginRequired })} />
-          <ToggleRow label="仅限会员本人预约" checked={ruleDraft.selfOnly} onChange={(selfOnly) => setRuleDraft({ ...ruleDraft, selfOnly })} />
-          <ReadonlyField label="每次预约人数" value="固定 1 人" />
-          <ToggleRow label="每会员只能预约一个场次" checked={ruleDraft.oneSessionPerMember} onChange={(oneSessionPerMember) => setRuleDraft({ ...ruleDraft, oneSessionPerMember })} />
-          <ToggleRow label="允许取消预约" checked={ruleDraft.allowCancel} onChange={(allowCancel) => setRuleDraft({ ...ruleDraft, allowCancel })} />
+          <ToggleRow label="仅限会员本人报名" checked={ruleDraft.selfOnly} onChange={(selfOnly) => setRuleDraft({ ...ruleDraft, selfOnly })} />
+          <ReadonlyField label="每次报名人数" value="仅限1人" />
+          <ToggleRow label="每会员只能报名一个场次" checked={ruleDraft.oneSessionPerMember} onChange={(oneSessionPerMember) => setRuleDraft({ ...ruleDraft, oneSessionPerMember })} />
+          <ToggleRow label="允许取消报名" checked={ruleDraft.allowCancel} onChange={(allowCancel) => setRuleDraft({ ...ruleDraft, allowCancel })} />
           <TextInput
             label="取消截止时间（活动开始前小时）"
             value={String(ruleDraft.cancelDeadlineHours)}
             onChange={(value) => setRuleDraft({ ...ruleDraft, cancelDeadlineHours: Number(value) || 0 })}
           />
           <button className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white" onClick={() => props.updateRule(ruleDraft)}>
-            保存预约规则
+            保存报名规则
           </button>
         </div>
       </Panel>
@@ -1940,9 +1940,9 @@ function AdminSessions({
             <Th>日期</Th>
             <Th>时间</Th>
             <Th>总库存/对外库存</Th>
-            <Th>客用已预约</Th>
+            <Th>客用已报名</Th>
             <Th>客用剩余</Th>
-            <Th>内部代约</Th>
+            <Th>内部代报名</Th>
             <Th>状态</Th>
             <Th>操作</Th>
           </tr>
@@ -2144,7 +2144,7 @@ function BookingList(props: {
           <tr>
             <Th>二维码</Th>
             <Th>会员信息</Th>
-            <Th>场次时间</Th>
+            <Th>场次</Th>
             <Th>状态</Th>
             <Th>填写信息</Th>
             <Th>签到状态</Th>
@@ -2221,7 +2221,7 @@ function BookingList(props: {
                 <Td>
                   <div className="flex flex-wrap gap-2">
                     <AdminAction onClick={() => window.alert(JSON.stringify(booking, null, 2))}>查看详情</AdminAction>
-                    <AdminAction onClick={() => props.cancelBooking(booking.bookingId)}>取消预约</AdminAction>
+                    <AdminAction onClick={() => props.cancelBooking(booking.bookingId)}>取消报名</AdminAction>
                     <AdminAction onClick={() => props.checkInBooking(booking.bookingId)}>模拟签到</AdminAction>
                   </div>
                 </Td>
