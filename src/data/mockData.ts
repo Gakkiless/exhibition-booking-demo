@@ -6,7 +6,7 @@ export const initialState: AppState = {
     name: "林嘉怡",
     phone: "138****5821",
     level: "铂金会员",
-    isLoggedIn: false,
+    isLoggedIn: true,
   },
   members: [
     {
@@ -14,7 +14,7 @@ export const initialState: AppState = {
       name: "林嘉怡",
       phone: "138****5821",
       level: "铂金会员",
-      isLoggedIn: false,
+      isLoggedIn: true,
     },
     {
       memberId: "MBR90008888",
@@ -145,6 +145,16 @@ export const initialState: AppState = {
       totalStock: 60,
       bookedCount: 60,
       status: "open",
+    },
+    {
+      sessionId: "SES_ENDED",
+      exhibitionId: "EXH001",
+      sessionName: "已结束导览场",
+      startTime: "2026-06-20 17:00",
+      endTime: "2026-06-20 18:00",
+      totalStock: 30,
+      bookedCount: 30,
+      status: "ended",
     },
     {
       sessionId: "SES003",
