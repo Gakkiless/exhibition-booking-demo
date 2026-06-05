@@ -9,6 +9,20 @@ import type {
 } from "../types/domain";
 
 export const activeBookingStatuses: BookingStatus[] = ["pending_checkin", "checked_in"];
+export const demoNowText = "2026-06-05 12:00";
+
+export function activityDisplayStatus(exhibition: Exhibition, now = demoNowText) {
+  if (exhibition.status !== "published") return "未上架";
+  if (now < exhibition.exhibitionStartTime) return "未开始";
+  if (now > exhibition.exhibitionEndTime) return "已结束";
+  return "进行中";
+}
+
+export function bookingTimeStatus(exhibition: Exhibition, now = demoNowText) {
+  if (now < exhibition.bookingStartTime) return "pending";
+  if (now > exhibition.bookingEndTime) return "ended";
+  return "open";
+}
 
 export function remainingStock(session: ExhibitionSession) {
   return Math.max(session.totalStock - session.bookedCount, 0);
@@ -110,6 +124,11 @@ export function validateBooking(input: ValidationInput): string | null {
 
   if (rule.loginRequired && !member.isLoggedIn) return "请先登录会员账号后再报名";
   if (exhibition.status !== "published") return "当前活动未上架，暂不可报名";
+  if (channel === "client") {
+    const timeStatus = bookingTimeStatus(exhibition);
+    if (timeStatus === "pending") return "报名暂未开始";
+    if (timeStatus === "ended") return "报名已结束";
+  }
   if (rule.selfOnly && (!member.memberId || !member.name || !member.phone)) {
     return "报名人信息必须来自当前登录会员";
   }

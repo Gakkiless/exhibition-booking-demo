@@ -33,7 +33,9 @@ import type {
   ToastType,
 } from "./types/domain";
 import {
+  activityDisplayStatus,
   bookingStatusText,
+  bookingTimeStatus,
   canClientBookSession,
   canSalesBookSession,
   createBookingCode,
@@ -65,6 +67,16 @@ function guestNameInitial(member: Member) {
 function bookingFormLabel(key: string, exhibition: Exhibition) {
   if (key === "guestName") return "姓名";
   return exhibition.bookingFields.find((item) => item.fieldId === key)?.label ?? key;
+}
+
+function bookingFormEntries(booking: Booking, exhibition: Exhibition, options?: { excludeGuestName?: boolean }) {
+  return Object.entries(booking.formValues ?? {})
+    .filter(([key, value]) => Boolean(value) && !(options?.excludeGuestName && key === "guestName"))
+    .map(([key, value]) => ({ key, label: bookingFormLabel(key, exhibition), value }));
+}
+
+function bookingSourceText(source: Booking["source"]) {
+  return source === "销售代客报名" ? "内部代约" : source;
 }
 
 type Toast = {
@@ -636,7 +648,7 @@ function MiniProgramCenter(props: {
       <section className="rounded-2xl bg-white p-2 shadow-sm">
         <CenterMenuItem
           icon={<Ticket size={18} />}
-          title="我的报名"
+          title="我的活动"
           desc="查看报名凭证、取消报名和签到状态"
           onClick={() => props.setPage("my")}
         />
@@ -697,6 +709,9 @@ function ClientBookingHome(props: {
   const [selectedDate, setSelectedDate] = useState(bookingDates[0] ?? "");
   const [calendarOpen, setCalendarOpen] = useState(false);
   const selectedSessions = props.sessions.filter((session) => datePart(session.startTime) === selectedDate);
+  const hasAnySession = props.sessions.length > 0;
+  const currentBookingTimeStatus = bookingTimeStatus(props.exhibition);
+  const canSubmitByBookingTime = currentBookingTimeStatus === "open";
 
   React.useEffect(() => {
     if (!bookingDates.includes(selectedDate)) {
@@ -711,10 +726,16 @@ function ClientBookingHome(props: {
   const selectedStatus = selectedVisibleSession
     ? displaySessionStatus(selectedVisibleSession, props.bookings, "client")
     : null;
-  const selectedCanBook = selectedVisibleSession
+  const selectedCanBook = canSubmitByBookingTime && selectedVisibleSession
     ? canClientBookSession(selectedVisibleSession, props.bookings)
     : false;
-  const submitButtonText = !selectedVisibleSession
+  const submitButtonText = !hasAnySession
+    ? "暂无可报名场次"
+    : currentBookingTimeStatus === "pending"
+    ? "报名暂未开始"
+    : currentBookingTimeStatus === "ended"
+      ? "报名已结束"
+      : !selectedVisibleSession
     ? "请选择场次"
     : selectedStatus === "full"
       ? "该场次已约满"
@@ -744,7 +765,7 @@ function ClientBookingHome(props: {
         </div>
         <div className="p-4">
           <div className="mb-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-            {props.exhibition.status === "published" ? "报名进行中" : "未上架"}
+            {activityDisplayStatus(props.exhibition)}
           </div>
           <h2 className="text-2xl font-semibold leading-tight text-slate-950">{props.exhibition.title}</h2>
           <p className="mt-3 text-sm leading-6 text-slate-600">{props.exhibition.description}</p>
@@ -760,6 +781,12 @@ function ClientBookingHome(props: {
         </div>
       </section>
 
+      {!hasAnySession ? (
+        <section className="rounded-2xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm">
+          暂无可报名场次
+        </section>
+      ) : (
+      <>
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
@@ -821,6 +848,8 @@ function ClientBookingHome(props: {
           </div>
         )}
       </section>
+      </>
+      )}
 
       <section className="rounded-2xl bg-white p-4 shadow-sm">
         <div className="mb-2 text-sm font-semibold text-slate-950">活动详细介绍</div>
@@ -1166,6 +1195,7 @@ function SuccessPage({
         <InfoRow label="活动地点" value={exhibition.location} />
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
+        <BookingFormSummary booking={booking} exhibition={exhibition} excludeGuestName />
         <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
           入场须知：报名码仅限会员本人使用，请按场次到场。二维码为 Demo 占位，后续可接入真实凭证生成与签到接口。
         </p>
@@ -1174,7 +1204,7 @@ function SuccessPage({
         onClick={() => setPage("my")}
         className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
       >
-        查看我的报名
+        查看我的活动
       </button>
     </div>
   );
@@ -1217,6 +1247,7 @@ function BookingVoucherModal({
         <InfoRow label="场次" value={`${session.sessionName} · ${formatRange(session.startTime, session.endTime)}`} />
         <InfoRow label="会员姓名" value={booking.memberName} />
         <InfoRow label="手机号" value={booking.memberPhone} />
+        <BookingFormSummary booking={booking} exhibition={exhibition} excludeGuestName />
         <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-500">
           Demo 中二维码为占位图。真实项目中员工端扫描该凭证后，由后台校验报名码并写入签到状态。
         </p>
@@ -1235,15 +1266,31 @@ function MyBookings(props: {
   sessions: ExhibitionSession[];
   cancelBooking: (bookingId: string) => void;
 }) {
+  const [detailBookingId, setDetailBookingId] = useState<string | null>(null);
+  const statusOrder: Record<BookingStatus, number> = {
+    pending_checkin: 0,
+    checked_in: 1,
+    cancelled: 2,
+    expired: 3,
+  };
+  const sortedBookings = [...props.bookings].sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+  const detailBooking = sortedBookings.find((booking) => booking.bookingId === detailBookingId) ?? null;
+  const detailExhibition = detailBooking
+    ? props.exhibitions.find((item) => item.exhibitionId === detailBooking.exhibitionId) ?? null
+    : null;
+  const detailSession = detailBooking
+    ? props.sessions.find((item) => item.sessionId === detailBooking.sessionId) ?? null
+    : null;
+
   return (
     <div className="space-y-3 p-4">
-      <h2 className="text-lg font-semibold text-slate-950">我的报名</h2>
+      <h2 className="text-lg font-semibold text-slate-950">我的活动</h2>
       {props.bookings.length === 0 && (
         <div className="rounded-2xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
           暂无当前会员报名记录
         </div>
       )}
-      {props.bookings.map((booking) => {
+      {sortedBookings.map((booking) => {
         const exhibition = props.exhibitions.find((item) => item.exhibitionId === booking.exhibitionId)!;
         const session = props.sessions.find((item) => item.sessionId === booking.sessionId)!;
         return (
@@ -1251,7 +1298,9 @@ function MyBookings(props: {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="font-semibold text-slate-950">{exhibition.title}</div>
-                <div className="mt-1 text-sm text-slate-600">{formatRange(session.startTime, session.endTime)}</div>
+                <div className="mt-1 text-sm text-slate-600">
+                  {session.sessionName} · {formatRange(session.startTime, session.endTime)}
+                </div>
               </div>
               <BookingStatusPill status={booking.status} />
             </div>
@@ -1260,12 +1309,15 @@ function MyBookings(props: {
             </div>
             <div className="mt-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
               签到状态：
-              <span className={booking.signedInAt ? "font-semibold text-emerald-700" : "font-semibold text-slate-500"}>
-                {booking.signedInAt ? `已签到 · ${booking.signedInAt}` : "未签到"}
+              <span className={booking.status === "checked_in" ? "font-semibold text-emerald-700" : "font-semibold text-slate-500"}>
+                {booking.status === "checked_in" ? `已签到 · ${booking.signedInAt ?? "-"}` : bookingStatusText(booking.status)}
               </span>
             </div>
             <div className="mt-3 flex gap-2">
-              <button className="flex-1 rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700">
+              <button
+                onClick={() => setDetailBookingId(booking.bookingId)}
+                className="flex-1 rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-700"
+              >
                 查看详情
               </button>
               <button
@@ -1279,6 +1331,14 @@ function MyBookings(props: {
           </section>
         );
       })}
+      {detailBooking && detailExhibition && detailSession && (
+        <BookingVoucherModal
+          booking={detailBooking}
+          exhibition={detailExhibition}
+          session={detailSession}
+          onClose={() => setDetailBookingId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1816,7 +1876,7 @@ function ActivityList(props: {
                 <Td className="font-medium text-slate-950">{item.title}</Td>
                 <Td>{item.location}</Td>
                 <Td>{formatRange(item.exhibitionStartTime, item.exhibitionEndTime)}</Td>
-                <Td>{item.status === "published" ? "已上架" : item.status === "closed" ? "已关闭" : "草稿"}</Td>
+                <Td>{item.status === "published" ? "已上架" : item.status === "closed" ? "取消" : "下架"}</Td>
                 <Td>{booked}</Td>
                 <Td>
                   <div className="flex flex-wrap gap-2">
@@ -2268,7 +2328,10 @@ function BookingList(props: {
                   <div className="font-medium text-slate-950">{booking.memberName}</div>
                   <div className="text-xs text-slate-500">{booking.memberId} / {booking.memberPhone} / {booking.memberLevel}</div>
                 </Td>
-                <Td>{formatRange(session.startTime, session.endTime)}</Td>
+                <Td>
+                  <div className="font-medium text-slate-700">{session.sessionName}</div>
+                  <div className="text-xs text-slate-500">{formatRange(session.startTime, session.endTime)}</div>
+                </Td>
                 <Td>{bookingStatusText(booking.status)}</Td>
                 <Td>
                   {booking.formValues && Object.values(booking.formValues).some(Boolean) ? (
@@ -2290,8 +2353,8 @@ function BookingList(props: {
                   )}
                 </Td>
                 <Td>
-                  <span className={booking.signedInAt ? "font-medium text-emerald-700" : "text-slate-400"}>
-                    {booking.signedInAt ? "已签到" : "未签到"}
+                  <span className={booking.status === "checked_in" ? "font-medium text-emerald-700" : "text-slate-400"}>
+                    {booking.status === "checked_in" ? "已签到" : bookingStatusText(booking.status)}
                   </span>
                 </Td>
                 <Td>
@@ -2299,7 +2362,7 @@ function BookingList(props: {
                   <div className="text-xs text-slate-400">{booking.signInSource ?? ""}</div>
                 </Td>
                 <Td>{booking.createdAt}</Td>
-                <Td>{booking.source}</Td>
+                <Td>{bookingSourceText(booking.source)}</Td>
                 <Td>
                   {booking.salesUserName ? (
                     <div>
@@ -2382,6 +2445,30 @@ function AdminMetric({ label, value }: { label: string; value: number }) {
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="text-sm text-slate-500">{label}</div>
       <div className="mt-2 text-3xl font-semibold text-slate-950">{value}</div>
+    </div>
+  );
+}
+
+function BookingFormSummary({
+  booking,
+  exhibition,
+  excludeGuestName = false,
+}: {
+  booking: Booking;
+  exhibition: Exhibition;
+  excludeGuestName?: boolean;
+}) {
+  const entries = bookingFormEntries(booking, exhibition, { excludeGuestName });
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mt-3 rounded-xl bg-slate-50 p-3">
+      <div className="mb-2 text-xs font-semibold text-slate-500">补充信息</div>
+      <div className="space-y-1">
+        {entries.map((entry) => (
+          <InfoRow key={entry.key} label={entry.label} value={entry.value} />
+        ))}
+      </div>
     </div>
   );
 }
