@@ -297,6 +297,53 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     notify("活动配置已保存，C 端展示已同步", "success");
   }
 
+  function addExhibition() {
+    const exhibitionId = `EXH${Date.now()}`;
+    const nextExhibition: Exhibition = {
+      exhibitionId,
+      title: "未命名活动",
+      coverImage:
+        "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80",
+      sharePosterImage:
+        "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&q=80",
+      sharePosterTitle: "未命名活动",
+      sharePosterDesc: "扫码进入松赞小程序查看活动详情。",
+      description: "请填写活动简介。",
+      detailedDescription: "请填写活动详细介绍。",
+      location: "请填写活动地点",
+      exhibitionStartTime: "2026-09-01 10:00",
+      exhibitionEndTime: "2026-09-01 18:00",
+      bookingStartTime: "2026-08-01 10:00",
+      bookingEndTime: "2026-08-31 18:00",
+      notice: "请按报名场次提前到场，报名凭证仅限本人使用。",
+      bookingFields: [
+        { fieldId: `withChildren_${Date.now()}`, label: "是否带儿童", required: true },
+        { fieldId: `childrenCount_${Date.now()}`, label: "儿童人数", required: false },
+        { fieldId: `childrenAge_${Date.now()}`, label: "儿童年龄", required: false },
+      ],
+      status: "draft",
+    };
+    const nextRule: BookingRule = {
+      exhibitionId,
+      loginRequired: true,
+      selfOnly: true,
+      fixedBookingCount: 1,
+      oneSessionPerMember: true,
+      allowCancel: true,
+      cancelDeadlineHours: 2,
+    };
+
+    // TODO API: 新增活动应提交到后端，由后端返回活动 ID 和默认报名规则。
+    setState((current) => ({
+      ...current,
+      exhibitions: [nextExhibition, ...current.exhibitions],
+      rules: [nextRule, ...current.rules],
+    }));
+    setSelectedExhibitionId(exhibitionId);
+    setAdminPage("config");
+    notify("已新增活动，请继续完善配置", "success");
+  }
+
   function updateRule(next: BookingRule) {
     // TODO API: 保存 B 端报名规则配置。
     setState((current) => ({
@@ -372,6 +419,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
             setSelectedExhibitionId={setSelectedExhibitionId}
             page={adminPage}
             setPage={setAdminPage}
+            addExhibition={addExhibition}
             updateExhibition={updateExhibition}
             updateRule={updateRule}
             updateSession={updateSession}
@@ -1344,6 +1392,7 @@ function AdminShell(props: {
   setSelectedExhibitionId: (id: string) => void;
   page: AdminPage;
   setPage: (page: AdminPage) => void;
+  addExhibition: () => void;
   updateExhibition: (next: Exhibition) => void;
   updateRule: (next: BookingRule) => void;
   updateSession: (next: ExhibitionSession) => void;
@@ -1417,6 +1466,7 @@ function AdminShell(props: {
             bookings={props.state.bookings}
             setSelectedExhibitionId={props.setSelectedExhibitionId}
             setPage={props.setPage}
+            addExhibition={props.addExhibition}
           />
         )}
         {props.page === "config" && (
@@ -1844,9 +1894,20 @@ function ActivityList(props: {
   bookings: Booking[];
   setSelectedExhibitionId: (id: string) => void;
   setPage: (page: AdminPage) => void;
+  addExhibition: () => void;
 }) {
   return (
-    <Panel title="活动列表">
+    <Panel
+      title="活动列表"
+      action={
+        <button
+          onClick={props.addExhibition}
+          className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+        >
+          新增活动
+        </button>
+      }
+    >
       <Table>
         <thead>
           <tr>
