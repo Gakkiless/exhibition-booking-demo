@@ -862,14 +862,6 @@ function ClientBookingHome(props: {
           具体活动规则
         </div>
         <p className="text-sm leading-6 text-slate-600">{props.exhibition.notice}</p>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
-          <BadgeText text={props.rule.loginRequired ? "必须登录" : "可游客报名"} />
-          <BadgeText text={props.rule.selfOnly ? "仅限本人" : "允许代报名"} />
-          <BadgeText text="仅限1人" />
-          <BadgeText text={props.rule.oneSessionPerMember ? "限报一场" : "可报多场"} />
-          <BadgeText text={props.rule.allowCancel ? `可取消，截止前 ${props.rule.cancelDeadlineHours} 小时` : "不可取消"} />
-          <BadgeText text="约满不可报名" />
-        </div>
       </section>
 
       <div className="sticky bottom-0 -mx-4 bg-white/90 p-4 backdrop-blur">
@@ -2405,10 +2397,6 @@ function ReadonlyField({ label, value }: { label: string; value: string }) {
       <span className="text-sm font-medium text-slate-900">{value}</span>
     </div>
   );
-}
-
-function BadgeText({ text }: { text: string }) {
-  return <span className="rounded-lg bg-slate-100 px-2 py-1 text-center">{text}</span>;
 }
 
 function MetricMini({ label, value }: { label: string; value: number }) {
