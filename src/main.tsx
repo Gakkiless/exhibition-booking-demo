@@ -2022,9 +2022,6 @@ function ConfigPage(props: {
       </Panel>
       <Panel title="报名规则配置">
         <div className="space-y-3">
-          <ToggleRow label="必须登录" checked={ruleDraft.loginRequired} onChange={(loginRequired) => setRuleDraft({ ...ruleDraft, loginRequired })} />
-          <ToggleRow label="仅限会员本人报名" checked={ruleDraft.selfOnly} onChange={(selfOnly) => setRuleDraft({ ...ruleDraft, selfOnly })} />
-          <ReadonlyField label="每次报名人数" value="仅限1人" />
           <ToggleRow label="每会员只能报名一个场次" checked={ruleDraft.oneSessionPerMember} onChange={(oneSessionPerMember) => setRuleDraft({ ...ruleDraft, oneSessionPerMember })} />
           <ToggleRow label="允许取消报名" checked={ruleDraft.allowCancel} onChange={(allowCancel) => setRuleDraft({ ...ruleDraft, allowCancel })} />
           <TextInput
