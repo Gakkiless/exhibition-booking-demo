@@ -12,6 +12,7 @@ export const activeBookingStatuses: BookingStatus[] = ["pending_checkin", "check
 export const demoNowText = "2026-06-05 12:00";
 
 export function activityDisplayStatus(exhibition: Exhibition, now = demoNowText) {
+  if (exhibition.status === "closed") return "已取消";
   if (exhibition.status !== "published") return "未上架";
   if (now < exhibition.exhibitionStartTime) return "未开始";
   if (now > exhibition.exhibitionEndTime) return "已结束";
