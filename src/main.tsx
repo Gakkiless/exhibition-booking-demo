@@ -10,6 +10,7 @@ import {
   Download,
   Home,
   QrCode,
+  ScanLine,
   Settings,
   Share2,
   ShieldCheck,
@@ -53,6 +54,7 @@ import {
 type ClientPage = "detail" | "center" | "confirm" | "success" | "my";
 type AdminPage = "dashboard" | "activities" | "config" | "sessions" | "bookings" | "assist";
 type AdminRole = "operator" | "sales";
+type AppMode = "client" | "admin" | "staff";
 
 type SalesUser = {
   salesUserId: string;
@@ -84,9 +86,23 @@ type Toast = {
   type: ToastType;
 };
 
+type StaffCheckInResult =
+  | {
+      ok: true;
+      guestName: string;
+      sessionText: string;
+      bookingCode: string;
+      signedAt: string;
+    }
+  | {
+      ok: false;
+      reason: string;
+      bookingCode?: string;
+    };
+
 function App() {
   const [state, setState] = useState<AppState>(initialState);
-  const [mode, setMode] = useState<"client" | "admin">("client");
+  const [mode, setMode] = useState<AppMode>("client");
   const [clientPage, setClientPage] = useState<ClientPage>("detail");
   const [adminPage, setAdminPage] = useState<AdminPage>("activities");
   const [adminRole, setAdminRole] = useState<AdminRole>("operator");
@@ -273,17 +289,64 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
   }
 
   function checkInBooking(bookingId: string) {
-    // TODO API: 调用签到接口，真实场景需校验报名码、场次时间和后台操作权限。
+    const booking = state.bookings.find((item) => item.bookingId === bookingId);
+    const result = booking ? checkInBookingByCode(booking.bookingCode) : { ok: false, reason: "未找到该报名记录" };
+    if (!result.ok) {
+      notify(`签到失败，${result.reason}`, "error");
+      return;
+    }
+    notify("已模拟签到该报名", "success");
+  }
+
+  function checkInBookingByCode(bookingCode: string): StaffCheckInResult {
+    const code = bookingCode.trim();
+    const booking = state.bookings.find((item) => item.bookingCode === code);
+    if (!booking) return { ok: false, reason: "未找到该报名凭证", bookingCode: code };
+
+    const targetExhibition = state.exhibitions.find((item) => item.exhibitionId === booking.exhibitionId);
+    const targetSession = state.sessions.find((item) => item.sessionId === booking.sessionId);
+    if (!targetExhibition || !targetSession) {
+      return { ok: false, reason: "报名数据不完整", bookingCode: booking.bookingCode };
+    }
+    if (targetExhibition.status === "closed") {
+      return { ok: false, reason: "活动已取消", bookingCode: booking.bookingCode };
+    }
+    if (targetExhibition.status !== "published") {
+      return { ok: false, reason: "活动未上架，不可签到", bookingCode: booking.bookingCode };
+    }
+    if (booking.status === "checked_in") {
+      return { ok: false, reason: "该客人已签到", bookingCode: booking.bookingCode };
+    }
+    if (booking.status === "cancelled") {
+      return { ok: false, reason: "该报名已取消", bookingCode: booking.bookingCode };
+    }
+    if (booking.status === "expired") {
+      return { ok: false, reason: "该报名已过期", bookingCode: booking.bookingCode };
+    }
+    if (targetSession.status === "pending") {
+      return { ok: false, reason: "签到场次未开放", bookingCode: booking.bookingCode };
+    }
+    if (targetSession.status === "ended") {
+      return { ok: false, reason: "签到场次已结束", bookingCode: booking.bookingCode };
+    }
+
+    // TODO API: 员工端扫码签到应调用签到接口，后端校验报名码、活动、场次和员工权限后返回签到结果。
     const signedAt = nowText();
     setState((current) => ({
       ...current,
       bookings: current.bookings.map((booking) =>
-        booking.bookingId === bookingId && booking.status === "pending_checkin"
-          ? { ...booking, status: "checked_in", checkedInAt: signedAt, signedInAt: signedAt }
+        booking.bookingCode === code && booking.status === "pending_checkin"
+          ? { ...booking, status: "checked_in", checkedInAt: signedAt, signedInAt: signedAt, signInSource: "现场二维码" }
           : booking,
       ),
     }));
-    notify("已模拟签到该报名", "success");
+    return {
+      ok: true,
+      guestName: booking.memberName,
+      sessionText: `${targetSession.sessionName} · ${formatRange(targetSession.startTime, targetSession.endTime)}`,
+      bookingCode: booking.bookingCode,
+      signedAt,
+    };
   }
 
   function updateExhibition(next: Exhibition) {
@@ -342,6 +405,30 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     setSelectedExhibitionId(exhibitionId);
     setAdminPage("config");
     notify("已新增活动，请继续完善配置", "success");
+  }
+
+  function cancelExhibition(exhibitionId: string) {
+    const target = state.exhibitions.find((item) => item.exhibitionId === exhibitionId);
+    if (!target) return;
+    if (target.status === "closed") {
+      notify("该活动已取消", "info");
+      return;
+    }
+    const cancelledAt = nowText();
+
+    // TODO API: 官方原因取消活动应调用活动取消接口，由后端锁定活动并批量取消报名记录。
+    setState((current) => ({
+      ...current,
+      exhibitions: current.exhibitions.map((item) =>
+        item.exhibitionId === exhibitionId ? { ...item, status: "closed" } : item,
+      ),
+      bookings: current.bookings.map((booking) =>
+        booking.exhibitionId === exhibitionId && booking.status !== "cancelled"
+          ? { ...booking, status: "cancelled", cancelledAt }
+          : booking,
+      ),
+    }));
+    notify("活动已取消，相关报名状态已批量更新为已取消", "success");
   }
 
   function updateRule(next: BookingRule) {
@@ -409,6 +496,11 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
             cancelBooking={cancelBooking}
             shareActivity={shareActivity}
           />
+        ) : mode === "staff" ? (
+          <StaffShell
+            state={state}
+            checkInBookingByCode={checkInBookingByCode}
+          />
         ) : (
           <AdminShell
             state={state}
@@ -420,6 +512,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
             page={adminPage}
             setPage={setAdminPage}
             addExhibition={addExhibition}
+            cancelExhibition={cancelExhibition}
             updateExhibition={updateExhibition}
             updateRule={updateRule}
             updateSession={updateSession}
@@ -448,9 +541,15 @@ function TopNav({
   mode,
   setMode,
 }: {
-  mode: "client" | "admin";
-  setMode: (mode: "client" | "admin") => void;
+  mode: AppMode;
+  setMode: (mode: AppMode) => void;
 }) {
+  const tabs: Array<{ key: AppMode; label: string }> = [
+    { key: "client", label: "C 端小程序" },
+    { key: "staff", label: "员工端" },
+    { key: "admin", label: "B 端后台" },
+  ];
+
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
@@ -459,18 +558,15 @@ function TopNav({
           <h1 className="text-lg font-semibold text-slate-950">线下活动报名</h1>
         </div>
         <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
-          <button
-            className={`rounded-md px-4 py-2 text-sm font-medium ${mode === "client" ? "bg-slate-950 text-white shadow-sm" : "text-slate-600"}`}
-            onClick={() => setMode("client")}
-          >
-            C 端小程序
-          </button>
-          <button
-            className={`rounded-md px-4 py-2 text-sm font-medium ${mode === "admin" ? "bg-slate-950 text-white shadow-sm" : "text-slate-600"}`}
-            onClick={() => setMode("admin")}
-          >
-            B 端后台
-          </button>
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={`rounded-md px-4 py-2 text-sm font-medium ${mode === tab.key ? "bg-slate-950 text-white shadow-sm" : "text-slate-600"}`}
+              onClick={() => setMode(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
     </header>
@@ -1300,6 +1396,182 @@ function BookingVoucherModal({
   );
 }
 
+function StaffShell({
+  state,
+  checkInBookingByCode,
+}: {
+  state: AppState;
+  checkInBookingByCode: (bookingCode: string) => StaffCheckInResult;
+}) {
+  const [scanOpen, setScanOpen] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  const [result, setResult] = useState<StaffCheckInResult | null>(null);
+
+  function scanCode(bookingCode: string) {
+    const nextResult = checkInBookingByCode(bookingCode);
+    setResult(nextResult);
+    setScanOpen(false);
+    setManualCode("");
+  }
+
+  return (
+    <div className="mx-auto max-w-[430px] overflow-hidden rounded-[28px] border border-slate-200 bg-slate-100 shadow-xl">
+      <div className="flex items-center justify-between bg-slate-950 px-5 py-3 text-white">
+        <span className="text-sm">松赞员工端</span>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs">现场签到</span>
+      </div>
+      <div className="min-h-[760px] space-y-4 bg-[#f7f8fa] p-4">
+        <section className="rounded-2xl bg-white p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-slate-950">员工扫码签到</div>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                员工扫描客人手机里的报名凭证二维码，系统校验报名状态后完成签到。
+              </p>
+            </div>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white">
+              <ScanLine size={24} />
+            </div>
+          </div>
+          <button
+            onClick={() => setScanOpen(true)}
+            className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 text-sm font-semibold text-white"
+          >
+            <ScanLine size={18} />
+            扫一扫
+          </button>
+        </section>
+      </div>
+      {scanOpen && (
+        <StaffScanSheet
+          bookings={state.bookings}
+          exhibitions={state.exhibitions}
+          sessions={state.sessions}
+          manualCode={manualCode}
+          setManualCode={setManualCode}
+          onClose={() => setScanOpen(false)}
+          onScan={scanCode}
+        />
+      )}
+      {result && <StaffCheckInResultModal result={result} onClose={() => setResult(null)} />}
+    </div>
+  );
+}
+
+function StaffScanSheet({
+  bookings,
+  exhibitions,
+  sessions,
+  manualCode,
+  setManualCode,
+  onScan,
+  onClose,
+}: {
+  bookings: Booking[];
+  exhibitions: Exhibition[];
+  sessions: ExhibitionSession[];
+  manualCode: string;
+  setManualCode: (value: string) => void;
+  onScan: (bookingCode: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/45 px-4 pb-4">
+      <section className="w-full max-w-[398px] rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold text-slate-950">模拟扫一扫</div>
+            <div className="mt-1 text-xs text-slate-500">选择一张客人报名凭证，或输入报名码</div>
+          </div>
+          <button onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="rounded-2xl bg-slate-50 p-4">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">报名码</span>
+            <input
+              value={manualCode}
+              onChange={(event) => setManualCode(event.target.value)}
+              placeholder="例如 EX260604001"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
+            />
+          </label>
+          <button
+            onClick={() => onScan(manualCode)}
+            className="mt-3 h-10 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
+          >
+            模拟扫描该报名码
+          </button>
+        </div>
+        <div className="mt-4 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+          {bookings.map((booking) => {
+            const exhibition = exhibitions.find((item) => item.exhibitionId === booking.exhibitionId);
+            const session = sessions.find((item) => item.sessionId === booking.sessionId);
+            return (
+              <button
+                key={booking.bookingId}
+                onClick={() => onScan(booking.bookingCode)}
+                className="flex w-full items-center gap-3 rounded-xl border border-slate-100 p-3 text-left hover:bg-slate-50"
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                  <QrCode size={20} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold text-slate-950">
+                    {booking.memberName} · {booking.bookingCode}
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-slate-500">
+                    {exhibition?.title ?? "活动缺失"} · {session?.sessionName ?? "场次缺失"} · {bookingStatusText(booking.status)}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StaffCheckInResultModal({
+  result,
+  onClose,
+}: {
+  result: StaffCheckInResult;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
+      <section className="w-full max-w-[360px] rounded-3xl bg-white p-5 text-center shadow-2xl">
+        <div
+          className={`mx-auto flex h-14 w-14 items-center justify-center rounded-full ${
+            result.ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+          }`}
+        >
+          {result.ok ? <CheckCircle2 size={30} /> : <CircleAlert size={30} />}
+        </div>
+        {result.ok ? (
+          <>
+            <h2 className="mt-4 text-lg font-semibold text-slate-950">客人：{result.guestName} 签到成功</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-500">签到场次{result.sessionText}</p>
+          </>
+        ) : (
+          <>
+            <h2 className="mt-4 text-lg font-semibold text-slate-950">签到失败，{result.reason}</h2>
+            {result.bookingCode && (
+              <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-xs text-slate-500">报名码 {result.bookingCode}</div>
+            )}
+          </>
+        )}
+        <button onClick={onClose} className="mt-5 h-11 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white">
+          知道了
+        </button>
+      </section>
+    </div>
+  );
+}
+
 function MyBookings(props: {
   bookings: Booking[];
   exhibitions: Exhibition[];
@@ -1393,6 +1665,7 @@ function AdminShell(props: {
   page: AdminPage;
   setPage: (page: AdminPage) => void;
   addExhibition: () => void;
+  cancelExhibition: (exhibitionId: string) => void;
   updateExhibition: (next: Exhibition) => void;
   updateRule: (next: BookingRule) => void;
   updateSession: (next: ExhibitionSession) => void;
@@ -1440,9 +1713,6 @@ function AdminShell(props: {
         </div>
         {[
           ["activities", "活动列表", ClipboardList],
-          ["config", "活动配置", Settings],
-          ["sessions", "场次管理", CalendarDays],
-          ["bookings", "报名名单", Ticket],
           ...(props.adminRole === "sales" ? [["assist", "代客报名", UsersRound]] : []),
         ].map(([key, label, Icon]) => (
           <button
@@ -1467,6 +1737,7 @@ function AdminShell(props: {
             setSelectedExhibitionId={props.setSelectedExhibitionId}
             setPage={props.setPage}
             addExhibition={props.addExhibition}
+            cancelExhibition={props.cancelExhibition}
           />
         )}
         {props.page === "config" && (
@@ -1482,6 +1753,7 @@ function AdminShell(props: {
             exhibitionId={props.selectedExhibitionId}
             sessions={selectedSessions}
             bookings={selectedBookings}
+            readonly={selectedExhibition.status === "closed"}
             updateSession={props.updateSession}
             addSession={props.addSession}
           />
@@ -1895,6 +2167,7 @@ function ActivityList(props: {
   setSelectedExhibitionId: (id: string) => void;
   setPage: (page: AdminPage) => void;
   addExhibition: () => void;
+  cancelExhibition: (exhibitionId: string) => void;
 }) {
   return (
     <Panel
@@ -1914,29 +2187,46 @@ function ActivityList(props: {
             <Th>活动名称</Th>
             <Th>活动地点</Th>
             <Th>活动时间</Th>
-            <Th>报名状态</Th>
+            <Th>状态</Th>
             <Th>总报名人数</Th>
             <Th>操作</Th>
           </tr>
         </thead>
         <tbody>
           {props.exhibitions.map((item) => {
-            const booked = props.bookings.filter(
-              (booking) => booking.exhibitionId === item.exhibitionId && booking.status !== "cancelled",
-            ).length;
+            const activityBookings = props.bookings.filter((booking) => booking.exhibitionId === item.exhibitionId);
+            const booked =
+              item.status === "closed"
+                ? activityBookings.length
+                : activityBookings.filter((booking) => booking.status !== "cancelled").length;
             return (
               <tr key={item.exhibitionId} className="border-t border-slate-100">
                 <Td className="font-medium text-slate-950">{item.title}</Td>
                 <Td>{item.location}</Td>
                 <Td>{formatRange(item.exhibitionStartTime, item.exhibitionEndTime)}</Td>
-                <Td>{item.status === "published" ? "已上架" : item.status === "closed" ? "取消" : "下架"}</Td>
+                <Td>{item.status === "published" ? "已上架" : item.status === "closed" ? "已取消" : "下架"}</Td>
                 <Td>{booked}</Td>
                 <Td>
                   <div className="flex flex-wrap gap-2">
-                    <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("config"); }}>编辑</AdminAction>
+                    <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("config"); }}>
+                      {item.status === "closed" ? "查看配置" : "编辑"}
+                    </AdminAction>
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("dashboard"); }}>查看数据</AdminAction>
-                    <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("sessions"); }}>查看场次</AdminAction>
+                    <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("sessions"); }}>场次管理</AdminAction>
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("bookings"); }}>报名名单</AdminAction>
+                    {item.status !== "closed" && (
+                      <AdminAction
+                        tone="danger"
+                        onClick={() => {
+                          const ok = window.confirm(
+                            `确认由于官方原因取消活动「${item.title}」吗？确认后所有已报名会员状态将变为已取消，活动不可再编辑。`,
+                          );
+                          if (ok) props.cancelExhibition(item.exhibitionId);
+                        }}
+                      >
+                        取消活动
+                      </AdminAction>
+                    )}
                   </div>
                 </Td>
               </tr>
@@ -1962,10 +2252,17 @@ function ConfigPage(props: {
     setRuleDraft(props.rule);
   }, [props.exhibition, props.rule]);
 
+  const isCancelled = props.exhibition.status === "closed";
+
   return (
     <div className="grid gap-5 xl:grid-cols-2">
       <Panel title="活动配置">
-        <div className="grid gap-3">
+        <fieldset disabled={isCancelled} className="grid gap-3 disabled:opacity-75">
+          {isCancelled && (
+            <div className="rounded-xl border border-rose-100 bg-rose-50 p-3 text-sm font-medium text-rose-700">
+              该活动已因官方原因取消，活动配置已锁定，仅支持查看历史配置。
+            </div>
+          )}
           <TextInput label="活动名称" value={draft.title} onChange={(title) => setDraft({ ...draft, title })} />
           <TextInput label="主图 URL" value={draft.coverImage} onChange={(coverImage) => setDraft({ ...draft, coverImage })} />
           <TextArea label="活动简介" value={draft.description} onChange={(description) => setDraft({ ...draft, description })} />
@@ -2079,10 +2376,15 @@ function ConfigPage(props: {
           <button className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white" onClick={() => props.updateExhibition(draft)}>
             保存活动配置
           </button>
-        </div>
+        </fieldset>
       </Panel>
       <Panel title="报名规则配置">
-        <div className="space-y-3">
+        <fieldset disabled={isCancelled} className="space-y-3 disabled:opacity-75">
+          {isCancelled && (
+            <div className="rounded-xl border border-rose-100 bg-rose-50 p-3 text-sm font-medium text-rose-700">
+              该活动已取消，报名规则已锁定，仅支持查看。
+            </div>
+          )}
           <ToggleRow label="每会员只能报名一个场次" checked={ruleDraft.oneSessionPerMember} onChange={(oneSessionPerMember) => setRuleDraft({ ...ruleDraft, oneSessionPerMember })} />
           <ToggleRow label="允许取消报名" checked={ruleDraft.allowCancel} onChange={(allowCancel) => setRuleDraft({ ...ruleDraft, allowCancel })} />
           <TextInput
@@ -2093,7 +2395,7 @@ function ConfigPage(props: {
           <button className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white" onClick={() => props.updateRule(ruleDraft)}>
             保存报名规则
           </button>
-        </div>
+        </fieldset>
       </Panel>
     </div>
   );
@@ -2103,12 +2405,14 @@ function AdminSessions({
   exhibitionId,
   sessions,
   bookings,
+  readonly,
   updateSession,
   addSession,
 }: {
   exhibitionId: string;
   sessions: ExhibitionSession[];
   bookings: Booking[];
+  readonly: boolean;
   updateSession: (next: ExhibitionSession) => void;
   addSession: (next: ExhibitionSession) => void;
 }) {
@@ -2118,15 +2422,19 @@ function AdminSessions({
     <Panel
       title="场次管理"
       action={
-        <button
-          onClick={() => setCreating((value) => !value)}
-          className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white"
-        >
-          {creating ? "收起新增" : "新增场次"}
-        </button>
+        readonly ? (
+          <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-medium text-rose-700">活动已取消，场次只读</span>
+        ) : (
+          <button
+            onClick={() => setCreating((value) => !value)}
+            className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white"
+          >
+            {creating ? "收起新增" : "新增场次"}
+          </button>
+        )
       }
     >
-      {creating && (
+      {creating && !readonly && (
         <NewSessionForm
           exhibitionId={exhibitionId}
           onCancel={() => setCreating(false)}
@@ -2152,7 +2460,7 @@ function AdminSessions({
         </thead>
         <tbody>
           {sessions.map((session) => (
-            <SessionRow key={session.sessionId} session={session} bookings={bookings} updateSession={updateSession} />
+            <SessionRow key={session.sessionId} session={session} bookings={bookings} readonly={readonly} updateSession={updateSession} />
           ))}
         </tbody>
       </Table>
@@ -2255,10 +2563,12 @@ function NewSessionForm({
 function SessionRow({
   session,
   bookings,
+  readonly,
   updateSession,
 }: {
   session: ExhibitionSession;
   bookings: Booking[];
+  readonly: boolean;
   updateSession: (next: ExhibitionSession) => void;
 }) {
   const [draft, setDraft] = useState(session);
@@ -2267,10 +2577,11 @@ function SessionRow({
 
   return (
     <tr className="border-t border-slate-100 align-top">
-      <Td><InlineInput value={draft.sessionName} onChange={(sessionName) => setDraft({ ...draft, sessionName })} /></Td>
+      <Td><InlineInput value={draft.sessionName} disabled={readonly} onChange={(sessionName) => setDraft({ ...draft, sessionName })} /></Td>
       <Td>
         <InlineInput
           type="date"
+          disabled={readonly}
           value={datePart(draft.startTime)}
           onChange={(date) =>
             setDraft({
@@ -2285,17 +2596,19 @@ function SessionRow({
         <div className="grid gap-2">
           <InlineInput
             type="time"
+            disabled={readonly}
             value={timePart(draft.startTime)}
             onChange={(startTime) => setDraft({ ...draft, startTime: composeDateTime(datePart(draft.startTime), startTime) })}
           />
           <InlineInput
             type="time"
+            disabled={readonly}
             value={timePart(draft.endTime)}
             onChange={(endTime) => setDraft({ ...draft, endTime: composeDateTime(datePart(draft.startTime), endTime) })}
           />
         </div>
       </Td>
-      <Td><InlineInput type="number" value={String(draft.totalStock)} onChange={(value) => setDraft({ ...draft, totalStock: Number(value) || 0 })} /></Td>
+      <Td><InlineInput type="number" disabled={readonly} value={String(draft.totalStock)} onChange={(value) => setDraft({ ...draft, totalStock: Number(value) || 0 })} /></Td>
       <Td>{draft.bookedCount}</Td>
       <Td>{remainingStock(draft)}</Td>
       <Td>{internalBookedCount(bookings, draft.sessionId)}</Td>
@@ -2303,18 +2616,22 @@ function SessionRow({
         <StatusPill status={displayStatus} />
       </Td>
       <Td>
-        <div className="flex gap-2">
-          <AdminAction
-            onClick={() =>
-              updateSession({
-                ...draft,
-                bookedCount: Math.min(draft.bookedCount, draft.totalStock),
-              })
-            }
-          >
-            保存
-          </AdminAction>
-        </div>
+        {readonly ? (
+          <span className="text-xs text-slate-400">只读</span>
+        ) : (
+          <div className="flex gap-2">
+            <AdminAction
+              onClick={() =>
+                updateSession({
+                  ...draft,
+                  bookedCount: Math.min(draft.bookedCount, draft.totalStock),
+                })
+              }
+            >
+              保存
+            </AdminAction>
+          </div>
+        )}
       </Td>
     </tr>
   );
@@ -2543,9 +2860,21 @@ function Td({ children, className = "" }: { children: React.ReactNode; className
   return <td className={`px-3 py-3 text-slate-600 ${className}`}>{children}</td>;
 }
 
-function AdminAction({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+function AdminAction({
+  children,
+  onClick,
+  tone = "default",
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  tone?: "default" | "danger";
+}) {
+  const className =
+    tone === "danger"
+      ? "border-rose-200 text-rose-600 hover:bg-rose-50"
+      : "border-slate-200 text-slate-700 hover:bg-slate-50";
   return (
-    <button onClick={onClick} className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+    <button onClick={onClick} className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium ${className}`}>
       {children}
     </button>
   );
@@ -2594,8 +2923,26 @@ function ToggleRow({ label, checked, onChange }: { label: string; checked: boole
   );
 }
 
-function InlineInput({ value, onChange, type = "text" }: { value: string; onChange: (value: string) => void; type?: string }) {
-  return <input type={type} value={value} onChange={(event) => onChange(event.target.value)} className="w-full min-w-28 rounded-lg border border-slate-200 px-2 py-1 text-sm" />;
+function InlineInput({
+  value,
+  onChange,
+  type = "text",
+  disabled = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full min-w-28 rounded-lg border border-slate-200 px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+    />
+  );
 }
 
 function ToastView({ toast }: { toast: Toast }) {
