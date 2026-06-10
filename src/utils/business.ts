@@ -29,6 +29,12 @@ export function remainingStock(session: ExhibitionSession) {
   return Math.max(session.totalStock - session.bookedCount, 0);
 }
 
+export function isSessionBookingDeadlineReached(session: ExhibitionSession, now = demoNowText) {
+  const closeHours = session.bookingCloseHours ?? 12;
+  const closeAt = new Date(session.startTime.replace(" ", "T")).getTime() - closeHours * 60 * 60 * 1000;
+  return new Date(now.replace(" ", "T")).getTime() >= closeAt;
+}
+
 export function internalBookedCount(bookings: Booking[], sessionId: string) {
   return bookings.filter(
     (booking) =>
@@ -48,11 +54,8 @@ export function publicRemainingStock(session: ExhibitionSession, bookings: Booki
 }
 
 export function displaySessionStatus(session: ExhibitionSession, bookings?: Booking[], channel: "client" | "sales" | "total" = "total"): SessionStatus {
-  if (session.status === "ended" || session.status === "pending") {
+  if (session.status === "ended" || session.status === "pending" || session.status === "closed") {
     return session.status;
-  }
-  if (channel === "sales") {
-    return "open";
   }
   const remain =
     channel === "client" && bookings
@@ -70,6 +73,7 @@ export function statusText(status: SessionStatus) {
     open: "可报名",
     full: "已约满",
     ended: "已结束",
+    closed: "已取消",
   };
   return map[status];
 }
@@ -89,12 +93,11 @@ export function canSelectSession(session: ExhibitionSession, bookings?: Booking[
 }
 
 export function canClientBookSession(session: ExhibitionSession, bookings: Booking[]) {
-  return canSelectSession(session, bookings, "client") && publicRemainingStock(session, bookings) > 0;
+  return canSelectSession(session, bookings, "client") && publicRemainingStock(session, bookings) > 0 && !isSessionBookingDeadlineReached(session);
 }
 
 export function canSalesBookSession(session: ExhibitionSession, bookings: Booking[]) {
-  void bookings;
-  return session.status === "open";
+  return canSelectSession(session, bookings, "sales") && remainingStock(session) > 0 && !isSessionBookingDeadlineReached(session);
 }
 
 export function hasActiveBookingForExhibition(
@@ -140,6 +143,7 @@ export function validateBooking(input: ValidationInput): string | null {
   if (channel === "sales") {
     if (!canSalesBookSession(session, bookings)) return `该场次${statusText(displaySessionStatus(session))}，销售不可继续代报名`;
   } else if (!canClientBookSession(session, bookings)) {
+    if (isSessionBookingDeadlineReached(session)) return "该场次报名已截止";
     return `该场次${statusText(displaySessionStatus(session, bookings, "client"))}，不可报名`;
   }
   if (!noticeAccepted) return "请先勾选并确认报名须知";
