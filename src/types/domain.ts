@@ -17,6 +17,7 @@ export type Exhibition = {
   sharePosterDesc: string;
   description: string;
   detailedDescription: string;
+  successSmsTemplate: string;
   location: string;
   exhibitionStartTime: string;
   exhibitionEndTime: string;
@@ -24,6 +25,8 @@ export type Exhibition = {
   bookingEndTime: string;
   notice: string;
   bookingFields: BookingField[];
+  visibleInMiniProgram: boolean;
+  shareEnabled: boolean;
   status: "draft" | "published" | "closed";
 };
 
@@ -43,7 +46,7 @@ export type BookingRule = {
   cancelDeadlineHours: number;
 };
 
-export type SessionStatus = "pending" | "open" | "full" | "ended";
+export type SessionStatus = "pending" | "open" | "full" | "ended" | "closed";
 
 export type ExhibitionSession = {
   sessionId: string;
@@ -53,6 +56,7 @@ export type ExhibitionSession = {
   endTime: string;
   totalStock: number;
   bookedCount: number;
+  bookingCloseHours: number;
   status: SessionStatus;
 };
 
@@ -82,6 +86,18 @@ export type Booking = {
   cancelledAt?: string;
 };
 
+export type OperationLog = {
+  logId: string;
+  objectType: "活动" | "场次";
+  objectId: string;
+  objectName: string;
+  action: string;
+  operatorRole: string;
+  operatorName: string;
+  createdAt: string;
+  detail: string;
+};
+
 export type AppState = {
   member: Member;
   members: Member[];
@@ -89,6 +105,7 @@ export type AppState = {
   rules: BookingRule[];
   sessions: ExhibitionSession[];
   bookings: Booking[];
+  operationLogs: OperationLog[];
 };
 
 export type ToastType = "success" | "error" | "info";
