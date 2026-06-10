@@ -69,6 +69,8 @@ export const initialState: AppState = {
         "以装置、影像与交互媒介呈现城市更新中的空间记忆。活动设置限流报名，会员凭报名码入场。",
       detailedDescription:
         "本活动采用分场次报名入场。会员完成报名后将在小程序内获得报名码和二维码占位凭证，现场由员工端扫描客人手机里的报名凭证完成签到。展陈内容围绕城市空间更新、公共记忆与当代媒介展开，适合会员与亲友按场次到场体验。",
+      successSmsTemplate:
+        "【松赞】您已成功报名「流动的城市：当代艺术沉浸展」，请按所选场次提前到场，并在小程序个人中心出示报名凭证。",
       location: "上海市徐汇区西岸艺术中心 A 馆",
       exhibitionStartTime: "2026-06-20 10:00",
       exhibitionEndTime: "2026-07-20 20:00",
@@ -81,6 +83,8 @@ export const initialState: AppState = {
         { fieldId: "childrenCount", label: "儿童人数", required: false },
         { fieldId: "childrenAge", label: "儿童年龄", required: false },
       ],
+      visibleInMiniProgram: true,
+      shareEnabled: true,
       status: "published",
     },
     {
@@ -95,6 +99,8 @@ export const initialState: AppState = {
       description: "展示新材料、灯光与零售空间设计的实验样本。",
       detailedDescription:
         "活动以设计师导览和材料样本体验为主，结合灯光、陈列与零售空间案例，帮助会员理解材料选择与空间氛围之间的关系。",
+      successSmsTemplate:
+        "【松赞】您已成功报名「材料与光：设计实验展」，请按活动场次到场，现场出示小程序报名凭证签到。",
       location: "上海市静安区创意园 2 号馆",
       exhibitionStartTime: "2026-08-05 09:30",
       exhibitionEndTime: "2026-08-18 18:30",
@@ -106,6 +112,8 @@ export const initialState: AppState = {
         { fieldId: "childrenCount", label: "儿童人数", required: false },
         { fieldId: "childrenAge", label: "儿童年龄", required: false },
       ],
+      visibleInMiniProgram: false,
+      shareEnabled: false,
       status: "draft",
     },
   ],
@@ -138,6 +146,7 @@ export const initialState: AppState = {
       endTime: "2026-06-04 16:00",
       totalStock: 20,
       bookedCount: 1,
+      bookingCloseHours: 12,
       status: "open",
     },
     {
@@ -148,6 +157,7 @@ export const initialState: AppState = {
       endTime: "2026-06-20 12:00",
       totalStock: 80,
       bookedCount: 62,
+      bookingCloseHours: 12,
       status: "open",
     },
     {
@@ -158,6 +168,7 @@ export const initialState: AppState = {
       endTime: "2026-06-20 16:00",
       totalStock: 60,
       bookedCount: 60,
+      bookingCloseHours: 12,
       status: "open",
     },
     {
@@ -168,6 +179,7 @@ export const initialState: AppState = {
       endTime: "2026-06-20 18:00",
       totalStock: 30,
       bookedCount: 30,
+      bookingCloseHours: 12,
       status: "ended",
     },
     {
@@ -178,6 +190,7 @@ export const initialState: AppState = {
       endTime: "2026-06-21 20:00",
       totalStock: 50,
       bookedCount: 18,
+      bookingCloseHours: 12,
       status: "pending",
     },
     {
@@ -188,6 +201,7 @@ export const initialState: AppState = {
       endTime: "2026-06-24 12:00",
       totalStock: 40,
       bookedCount: 9,
+      bookingCloseHours: 12,
       status: "open",
     },
     {
@@ -198,6 +212,7 @@ export const initialState: AppState = {
       endTime: "2026-08-05 11:30",
       totalStock: 30,
       bookedCount: 0,
+      bookingCloseHours: 12,
       status: "pending",
     },
   ],
@@ -241,6 +256,19 @@ export const initialState: AppState = {
         childrenCount: "1",
         childrenAge: "6 岁",
       },
+    },
+  ],
+  operationLogs: [
+    {
+      logId: "LOG_INIT_001",
+      objectType: "活动",
+      objectId: "EXH001",
+      objectName: "流动的城市：当代艺术沉浸展",
+      action: "初始化活动",
+      operatorRole: "运营",
+      operatorName: "系统",
+      createdAt: "2026-06-03 09:00",
+      detail: "创建 Demo 活动、报名规则和默认场次",
     },
   ],
 };
