@@ -7,8 +7,11 @@ import {
   ChevronRight,
   CircleAlert,
   ClipboardList,
+  Copy,
   Download,
+  FileClock,
   Home,
+  MessageCircle,
   QrCode,
   ScanLine,
   Settings,
@@ -30,6 +33,7 @@ import type {
   Exhibition,
   ExhibitionSession,
   Member,
+  OperationLog,
   SessionStatus,
   ToastType,
 } from "./types/domain";
@@ -44,6 +48,7 @@ import {
   formatRange,
   hasActiveBookingForExhibition,
   internalBookedCount,
+  isSessionBookingDeadlineReached,
   nowText,
   publicRemainingStock,
   remainingStock,
@@ -52,7 +57,7 @@ import {
 } from "./utils/business";
 
 type ClientPage = "detail" | "center" | "confirm" | "success" | "my";
-type AdminPage = "dashboard" | "activities" | "config" | "sessions" | "bookings" | "assist";
+type AdminPage = "dashboard" | "activities" | "config" | "sessions" | "bookings" | "assist" | "logs";
 type AdminRole = "operator" | "sales";
 type AppMode = "client" | "admin" | "staff";
 
@@ -123,6 +128,16 @@ function App() {
     salesRole: "松赞销售顾问",
   };
 
+  function createOperationLog(input: Pick<OperationLog, "objectType" | "objectId" | "objectName" | "action" | "detail">): OperationLog {
+    return {
+      logId: `LOG${Date.now()}${Math.floor(Math.random() * 90 + 10)}`,
+      operatorRole: adminRole === "sales" ? activeSalesUser.salesRole : "运营",
+      operatorName: adminRole === "sales" ? activeSalesUser.salesUserName : "运营管理员",
+      createdAt: nowText(),
+      ...input,
+    };
+  }
+
   function notify(message: string, type: ToastType = "info") {
     setToast({ message, type });
     window.setTimeout(() => setToast(null), 2600);
@@ -166,6 +181,10 @@ function App() {
   }
 
   function shareActivity() {
+    if (!exhibition.shareEnabled) {
+      notify("该活动未开放分享", "info");
+      return;
+    }
     setSharePosterOpen(true);
   }
 
@@ -227,7 +246,7 @@ function App() {
     setState((current) => ({
       ...current,
       sessions: current.sessions.map((session) =>
-        session.sessionId === targetSession.sessionId && input.source !== "销售代客报名"
+        session.sessionId === targetSession.sessionId
           ? { ...session, bookedCount: Math.min(session.bookedCount + 1, session.totalStock) }
           : session,
       ),
@@ -280,7 +299,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
         item.bookingId === bookingId ? { ...item, status: "cancelled", cancelledAt: nowText() } : item,
       ),
       sessions: current.sessions.map((session) =>
-        session.sessionId === booking.sessionId && booking.source !== "销售代客报名"
+        session.sessionId === booking.sessionId
           ? { ...session, bookedCount: Math.max(session.bookedCount - booking.bookingCount, 0) }
           : session,
       ),
@@ -329,6 +348,9 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     if (targetSession.status === "ended") {
       return { ok: false, reason: "签到场次已结束", bookingCode: booking.bookingCode };
     }
+    if (targetSession.status === "closed") {
+      return { ok: false, reason: "签到场次已取消", bookingCode: booking.bookingCode };
+    }
 
     // TODO API: 员工端扫码签到应调用签到接口，后端校验报名码、活动、场次和员工权限后返回签到结果。
     const signedAt = nowText();
@@ -351,11 +373,19 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
 
   function updateExhibition(next: Exhibition) {
     // TODO API: 保存 B 端活动配置。
+    const log = createOperationLog({
+      objectType: "活动",
+      objectId: next.exhibitionId,
+      objectName: next.title,
+      action: "保存活动配置",
+      detail: `保存活动基础信息、分享设置、短信文案和报名字段。活动状态：${next.status === "published" ? "已上架" : next.status === "closed" ? "已取消" : "下架"}`,
+    });
     setState((current) => ({
       ...current,
       exhibitions: current.exhibitions.map((item) =>
         item.exhibitionId === next.exhibitionId ? next : item,
       ),
+      operationLogs: [log, ...current.operationLogs],
     }));
     notify("活动配置已保存，C 端展示已同步", "success");
   }
@@ -373,6 +403,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
       sharePosterDesc: "扫码进入松赞小程序查看活动详情。",
       description: "请填写活动简介。",
       detailedDescription: "请填写活动详细介绍。",
+      successSmsTemplate: "【松赞】您已成功报名「未命名活动」，请按所选场次到场，并在小程序个人中心出示报名凭证。",
       location: "请填写活动地点",
       exhibitionStartTime: "2026-09-01 10:00",
       exhibitionEndTime: "2026-09-01 18:00",
@@ -384,6 +415,8 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
         { fieldId: `childrenCount_${Date.now()}`, label: "儿童人数", required: false },
         { fieldId: `childrenAge_${Date.now()}`, label: "儿童年龄", required: false },
       ],
+      visibleInMiniProgram: true,
+      shareEnabled: true,
       status: "draft",
     };
     const nextRule: BookingRule = {
@@ -397,10 +430,18 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     };
 
     // TODO API: 新增活动应提交到后端，由后端返回活动 ID 和默认报名规则。
+    const log = createOperationLog({
+      objectType: "活动",
+      objectId: exhibitionId,
+      objectName: nextExhibition.title,
+      action: "新增活动",
+      detail: "新增活动并生成默认报名规则",
+    });
     setState((current) => ({
       ...current,
       exhibitions: [nextExhibition, ...current.exhibitions],
       rules: [nextRule, ...current.rules],
+      operationLogs: [log, ...current.operationLogs],
     }));
     setSelectedExhibitionId(exhibitionId);
     setAdminPage("config");
@@ -417,6 +458,13 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
     const cancelledAt = nowText();
 
     // TODO API: 官方原因取消活动应调用活动取消接口，由后端锁定活动并批量取消报名记录。
+    const log = createOperationLog({
+      objectType: "活动",
+      objectId: target.exhibitionId,
+      objectName: target.title,
+      action: "取消活动",
+      detail: "由于官方原因取消活动，并将活动下未取消报名批量置为已取消",
+    });
     setState((current) => ({
       ...current,
       exhibitions: current.exhibitions.map((item) =>
@@ -427,31 +475,88 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
           ? { ...booking, status: "cancelled", cancelledAt }
           : booking,
       ),
+      operationLogs: [log, ...current.operationLogs],
     }));
     notify("活动已取消，相关报名状态已批量更新为已取消", "success");
   }
 
   function updateRule(next: BookingRule) {
     // TODO API: 保存 B 端报名规则配置。
+    const target = state.exhibitions.find((item) => item.exhibitionId === next.exhibitionId);
+    const log = createOperationLog({
+      objectType: "活动",
+      objectId: next.exhibitionId,
+      objectName: target?.title ?? next.exhibitionId,
+      action: "保存报名规则",
+      detail: `每会员限约一场：${next.oneSessionPerMember ? "是" : "否"}；允许取消：${next.allowCancel ? "是" : "否"}；取消截止：活动开始前 ${next.cancelDeadlineHours} 小时`,
+    });
     setState((current) => ({
       ...current,
       rules: current.rules.map((item) => (item.exhibitionId === next.exhibitionId ? next : item)),
+      operationLogs: [log, ...current.operationLogs],
     }));
     notify("报名规则已保存，C 端校验已同步", "success");
   }
 
   function updateSession(next: ExhibitionSession) {
     // TODO API: 保存场次信息和库存配置，并从后端读取最新库存。
+    const normalized = {
+      ...next,
+      bookingCloseHours: Math.max(next.bookingCloseHours ?? 12, 0),
+      bookedCount: Math.min(next.bookedCount, next.totalStock),
+    };
+    const log = createOperationLog({
+      objectType: "场次",
+      objectId: normalized.sessionId,
+      objectName: normalized.sessionName,
+      action: "保存场次",
+      detail: `时间：${formatRange(normalized.startTime, normalized.endTime)}；总库存：${normalized.totalStock}；场次开始前 ${normalized.bookingCloseHours} 小时截止报名`,
+    });
     setState((current) => ({
       ...current,
-      sessions: current.sessions.map((item) => (item.sessionId === next.sessionId ? next : item)),
+      sessions: current.sessions.map((item) => (item.sessionId === next.sessionId ? normalized : item)),
+      operationLogs: [log, ...current.operationLogs],
     }));
     notify("场次已更新，库存展示已同步", "success");
   }
 
+  function cancelSession(sessionId: string) {
+    const target = state.sessions.find((item) => item.sessionId === sessionId);
+    if (!target) return;
+    const cancelledAt = nowText();
+    // TODO API: 取消场次应由后端锁定场次，并批量取消该场次下未核销报名。
+    const log = createOperationLog({
+      objectType: "场次",
+      objectId: target.sessionId,
+      objectName: target.sessionName,
+      action: "取消场次",
+      detail: `取消场次 ${formatRange(target.startTime, target.endTime)}，并将该场次未取消报名批量置为已取消`,
+    });
+    setState((current) => ({
+      ...current,
+      sessions: current.sessions.map((session) =>
+        session.sessionId === sessionId ? { ...session, status: "closed" } : session,
+      ),
+      bookings: current.bookings.map((booking) =>
+        booking.sessionId === sessionId && booking.status !== "cancelled"
+          ? { ...booking, status: "cancelled", cancelledAt }
+          : booking,
+      ),
+      operationLogs: [log, ...current.operationLogs],
+    }));
+    notify("场次已取消，相关报名已批量更新为已取消", "success");
+  }
+
   function addSession(next: ExhibitionSession) {
     // TODO API: 新增场次应提交到后端，由后端返回场次 ID、库存和初始状态。
-    setState((current) => ({ ...current, sessions: [...current.sessions, next] }));
+    const log = createOperationLog({
+      objectType: "场次",
+      objectId: next.sessionId,
+      objectName: next.sessionName,
+      action: "新增场次",
+      detail: `新增场次 ${formatRange(next.startTime, next.endTime)}；总库存：${next.totalStock}`,
+    });
+    setState((current) => ({ ...current, sessions: [...current.sessions, next], operationLogs: [log, ...current.operationLogs] }));
     notify("已新增场次", "success");
   }
 
@@ -472,7 +577,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
   return (
     <div className="min-h-screen">
       <TopNav mode={mode} setMode={setMode} />
-      <main className="mx-auto max-w-7xl px-4 py-6">
+      <main className="mx-auto w-full max-w-[1920px] px-4 py-6 xl:px-8">
         {mode === "client" ? (
           <ClientShell
             state={state}
@@ -517,6 +622,7 @@ function submitBooking(noticeAccepted: boolean, formValues: Record<string, strin
             updateRule={updateRule}
             updateSession={updateSession}
             addSession={addSession}
+            cancelSession={cancelSession}
             cancelBooking={cancelBooking}
             checkInBooking={checkInBooking}
             assistBooking={assistBooking}
@@ -552,7 +658,7 @@ function TopNav({
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+      <div className="mx-auto flex w-full max-w-[1920px] items-center justify-between px-4 py-3 xl:px-8">
         <div>
           <div className="text-sm text-slate-500">Demo</div>
           <h1 className="text-lg font-semibold text-slate-950">线下活动报名</h1>
@@ -870,6 +976,7 @@ function ClientBookingHome(props: {
   const selectedStatus = selectedVisibleSession
     ? displaySessionStatus(selectedVisibleSession, props.bookings, "client")
     : null;
+  const selectedDeadlineReached = selectedVisibleSession ? isSessionBookingDeadlineReached(selectedVisibleSession) : false;
   const selectedCanBook = canSubmitByBookingTime && selectedVisibleSession
     ? canClientBookSession(selectedVisibleSession, props.bookings)
     : false;
@@ -881,6 +988,8 @@ function ClientBookingHome(props: {
       ? "报名已结束"
       : !selectedVisibleSession
     ? "请选择场次"
+    : selectedDeadlineReached
+      ? "该场次报名已截止"
     : selectedStatus === "full"
       ? "该场次已约满"
       : selectedStatus === "ended"
@@ -900,6 +1009,7 @@ function ClientBookingHome(props: {
         />
           <button
             onClick={props.shareActivity}
+            hidden={!props.exhibition.shareEnabled}
             className="absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-950 shadow-md backdrop-blur"
             title="分享活动"
             aria-label="分享活动"
@@ -1022,6 +1132,14 @@ function ClientBookingHome(props: {
           {submitButtonText}
         </button>
       </div>
+      <button
+        onClick={() => window.alert("已唤起客服入口。真实项目可接小程序客服或企微客服。")}
+        className="fixed bottom-24 right-[calc(50%-206px)] z-20 flex h-12 w-12 items-center justify-center rounded-full bg-slate-950 text-white shadow-lg"
+        title="联系客服"
+        aria-label="联系客服"
+      >
+        <MessageCircle size={22} />
+      </button>
     </div>
   );
 }
@@ -1336,12 +1454,20 @@ function SuccessPage({
           入场须知：报名码仅限会员本人使用，请按场次到场。二维码为 Demo 占位，后续可接入真实凭证生成与签到接口。
         </p>
       </section>
-      <button
-        onClick={() => setPage("my")}
-        className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
-      >
-        查看我的活动
-      </button>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => setPage("detail")}
+          className="h-12 w-full rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700"
+        >
+          返回首页
+        </button>
+        <button
+          onClick={() => setPage("my")}
+          className="h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
+        >
+          查看我的活动
+        </button>
+      </div>
     </div>
   );
 }
@@ -1670,6 +1796,7 @@ function AdminShell(props: {
   updateRule: (next: BookingRule) => void;
   updateSession: (next: ExhibitionSession) => void;
   addSession: (next: ExhibitionSession) => void;
+  cancelSession: (sessionId: string) => void;
   cancelBooking: (bookingId: string) => void;
   checkInBooking: (bookingId: string) => void;
   assistBooking: (member: Member, exhibitionId: string, sessionId: string, formValues: Record<string, string>) => boolean;
@@ -1688,7 +1815,7 @@ function AdminShell(props: {
   );
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[240px_1fr]">
+    <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
       <aside className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="mb-3 px-2 text-xs font-semibold uppercase text-slate-400">运营后台</div>
         <div className="mb-4 rounded-lg bg-slate-50 p-1">
@@ -1713,6 +1840,7 @@ function AdminShell(props: {
         </div>
         {[
           ["activities", "活动列表", ClipboardList],
+          ["logs", "操作日志", FileClock],
           ...(props.adminRole === "sales" ? [["assist", "代客报名", UsersRound]] : []),
         ].map(([key, label, Icon]) => (
           <button
@@ -1756,16 +1884,21 @@ function AdminShell(props: {
             readonly={selectedExhibition.status === "closed"}
             updateSession={props.updateSession}
             addSession={props.addSession}
+            cancelSession={props.cancelSession}
           />
         )}
         {props.page === "bookings" && (
           <BookingList
             bookings={selectedBookings}
+            allBookings={props.state.bookings}
             exhibitions={props.state.exhibitions}
             sessions={props.state.sessions}
             cancelBooking={props.cancelBooking}
             checkInBooking={props.checkInBooking}
           />
+        )}
+        {props.page === "logs" && (
+          <OperationLogPage logs={props.state.operationLogs} />
         )}
         {props.page === "assist" && props.adminRole === "sales" && (
           <AssistedBookingPage
@@ -1821,9 +1954,9 @@ function Dashboard({
         action={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">按单个活动统计</span>}
       >
         <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <AdminMetric label="总库存/对外库存" value={stats.totalStock} />
-        <AdminMetric label="客用已报名人数" value={stats.booked} />
-        <AdminMetric label="客用剩余库存" value={stats.remain} />
+        <AdminMetric label="总库存" value={stats.totalStock} />
+        <AdminMetric label="已报名人数" value={stats.booked} />
+        <AdminMetric label="剩余库存" value={stats.remain} />
         <AdminMetric label="内部代报名人数" value={stats.assisted} />
         <AdminMetric label="签到人数" value={stats.signed} />
         <AdminMetric label="取消人数" value={stats.cancelled} />
@@ -1884,6 +2017,93 @@ function Dashboard({
         </div>
       </Panel>
     </div>
+  );
+}
+
+function OperationLogPage({ logs }: { logs: OperationLog[] }) {
+  const [typeFilter, setTypeFilter] = useState<"all" | OperationLog["objectType"]>("all");
+  const [keyword, setKeyword] = useState("");
+  const rows = logs.filter((log) => {
+    const matchedType = typeFilter === "all" || log.objectType === typeFilter;
+    const value = keyword.trim().toLowerCase();
+    const matchedKeyword =
+      !value ||
+      [log.objectName, log.objectId, log.action, log.operatorName, log.detail].some((text) =>
+        text.toLowerCase().includes(value),
+      );
+    return matchedType && matchedKeyword;
+  });
+
+  return (
+    <Panel
+      title="操作日志"
+      action={
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder="搜索对象/操作/操作人"
+            className="h-10 min-w-64 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-950"
+          />
+          <select
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value as "all" | OperationLog["objectType"])}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          >
+            <option value="all">全部对象</option>
+            <option value="活动">活动</option>
+            <option value="场次">场次</option>
+          </select>
+        </div>
+      }
+    >
+      <Table>
+        <thead>
+          <tr>
+            <Th>操作时间</Th>
+            <Th>对象类型</Th>
+            <Th>对象名称</Th>
+            <Th>操作</Th>
+            <Th>操作人</Th>
+            <Th>详情</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((log) => (
+            <tr key={log.logId} className="border-t border-slate-100">
+              <Td>{log.createdAt}</Td>
+              <Td>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                  {log.objectType}
+                </span>
+              </Td>
+              <Td>
+                <div className="font-medium text-slate-950">{log.objectName}</div>
+                <div className="mt-1 text-xs text-slate-400">{log.objectId}</div>
+              </Td>
+              <Td>{log.action}</Td>
+              <Td>
+                <div className="font-medium text-slate-700">{log.operatorName}</div>
+                <div className="mt-1 text-xs text-slate-400">{log.operatorRole}</div>
+              </Td>
+              <Td>
+                <div className="max-w-[520px] whitespace-normal leading-6">{log.detail}</div>
+              </Td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr className="border-t border-slate-100">
+              <Td className="text-center text-slate-400">暂无操作日志</Td>
+              <Td>{""}</Td>
+              <Td>{""}</Td>
+              <Td>{""}</Td>
+              <Td>{""}</Td>
+              <Td>{""}</Td>
+            </tr>
+          )}
+        </tbody>
+      </Table>
+    </Panel>
   );
 }
 
@@ -1966,6 +2186,10 @@ function AssistedBookingPage(props: {
       return;
     }
     if (!canSalesBookSession(selectedSession, props.bookings)) {
+      if (isSessionBookingDeadlineReached(selectedSession)) {
+        setMessage("该场次报名已截止，销售不可代报名");
+        return;
+      }
       setMessage(`该场次${statusText(displaySessionStatus(selectedSession, props.bookings, "sales"))}，销售不可代报名`);
       return;
     }
@@ -2094,7 +2318,7 @@ function AssistedBookingPage(props: {
                         <span className="rounded-full bg-white/20 px-2 py-1 text-xs">{statusText(displayStatus)}</span>
                       </div>
                       <div className="mt-3 text-xs opacity-75">
-                        内部已代报名 {internalBookedCount(props.bookings, session.sessionId)} 人 · 不占用客用库存
+                        剩余库存 {remainingStock(session)} · 内部已代报名 {internalBookedCount(props.bookings, session.sessionId)} 人
                       </div>
                     </button>
                   );
@@ -2141,7 +2365,7 @@ function AssistedBookingPage(props: {
             )}
 
             <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-              规则提示：销售代客报名仅可选择现有会员，不占用 C 端客用总库存，也不会影响客人看到的剩余名额；仍遵守活动上架、场次状态和每会员限约一场规则。
+              规则提示：销售代客报名仅可选择现有会员，和客用报名共用同一个场次总库存；仍遵守活动上架、场次状态、场次报名截止时间和每会员限约一场规则。
               {activeBookingBlocked && (
                 <div className="mt-2 font-semibold text-rose-700">该会员已有有效报名，当前规则禁止再次报名。</div>
               )}
@@ -2169,16 +2393,33 @@ function ActivityList(props: {
   addExhibition: () => void;
   cancelExhibition: (exhibitionId: string) => void;
 }) {
+  const [linkExhibition, setLinkExhibition] = useState<Exhibition | null>(null);
+  const [keyword, setKeyword] = useState("");
+  const filteredExhibitions = props.exhibitions.filter((item) => {
+    const value = keyword.trim().toLowerCase();
+    if (!value) return true;
+    return [item.title, item.location, item.exhibitionId].some((text) => text.toLowerCase().includes(value));
+  });
+
   return (
+    <>
     <Panel
       title="活动列表"
       action={
-        <button
-          onClick={props.addExhibition}
-          className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
-        >
-          新增活动
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            placeholder="搜索活动名称/地点"
+            className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-950"
+          />
+          <button
+            onClick={props.addExhibition}
+            className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+          >
+            新增活动
+          </button>
+        </div>
       }
     >
       <Table>
@@ -2193,7 +2434,7 @@ function ActivityList(props: {
           </tr>
         </thead>
         <tbody>
-          {props.exhibitions.map((item) => {
+          {filteredExhibitions.map((item) => {
             const activityBookings = props.bookings.filter((booking) => booking.exhibitionId === item.exhibitionId);
             const booked =
               item.status === "closed"
@@ -2214,6 +2455,7 @@ function ActivityList(props: {
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("dashboard"); }}>查看数据</AdminAction>
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("sessions"); }}>场次管理</AdminAction>
                     <AdminAction onClick={() => { props.setSelectedExhibitionId(item.exhibitionId); props.setPage("bookings"); }}>报名名单</AdminAction>
+                    {item.shareEnabled && <AdminAction onClick={() => setLinkExhibition(item)}>复制链接</AdminAction>}
                     {item.status !== "closed" && (
                       <AdminAction
                         tone="danger"
@@ -2235,6 +2477,87 @@ function ActivityList(props: {
         </tbody>
       </Table>
     </Panel>
+    {linkExhibition && (
+      <ActivityLinkModal exhibition={linkExhibition} onClose={() => setLinkExhibition(null)} />
+    )}
+    </>
+  );
+}
+
+function ActivityLinkModal({
+  exhibition,
+  onClose,
+}: {
+  exhibition: Exhibition;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const activityLink =
+    typeof window === "undefined"
+      ? ""
+      : `${window.location.origin}${window.location.pathname}?activityId=${encodeURIComponent(exhibition.exhibitionId)}`;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(activityLink);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+      window.alert("当前浏览器不支持复制，请手动复制活动链接");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
+      <section className="w-full max-w-[420px] rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <div className="text-sm font-semibold text-slate-950">活动投放链接</div>
+            <div className="mt-1 text-xs text-slate-500">用于销售转发、社群或外部渠道投放</div>
+          </div>
+          <button onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+          <div className="text-sm font-semibold text-slate-950">{exhibition.title}</div>
+          <div className="mt-3 flex items-center gap-2 rounded-xl bg-white p-3">
+            <div className="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-slate-600">
+              {activityLink}
+            </div>
+            <button
+              onClick={copyLink}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+              title="复制活动链接"
+              aria-label="复制活动链接"
+            >
+              <Copy size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-4 rounded-2xl border border-slate-100 p-4">
+          <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50">
+            <QrCode size={58} className="text-slate-500" />
+          </div>
+          <div className="min-w-0 text-sm">
+            <div className="font-semibold text-slate-950">活动页二维码</div>
+            <p className="mt-2 leading-6 text-slate-500">
+              二维码为 Demo 占位，真实项目可接活动页二维码或小程序码生成接口。
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={copyLink}
+          className="mt-5 h-12 w-full rounded-xl bg-slate-950 text-sm font-semibold text-white"
+        >
+          {copied ? "已复制" : "复制活动链接"}
+        </button>
+      </section>
+    </div>
   );
 }
 
@@ -2279,6 +2602,24 @@ function ConfigPage(props: {
             <TextInput label="报名时间" value={draft.bookingEndTime} onChange={(bookingEndTime) => setDraft({ ...draft, bookingEndTime })} />
           </div>
           <TextArea label="报名须知" value={draft.notice} onChange={(notice) => setDraft({ ...draft, notice })} />
+          <ToggleRow
+            label="是否允许分享"
+            checked={draft.shareEnabled}
+            onChange={(shareEnabled) => setDraft({ ...draft, shareEnabled })}
+          />
+          <div className="rounded-xl border border-slate-200 p-4">
+            <div className="mb-3">
+              <div className="text-sm font-semibold text-slate-950">报名成功短信文案配置</div>
+              <div className="mt-1 text-xs text-slate-500">
+                用于不同活动报名成功后发送不同短信，真实项目由后端短信服务读取该模板发送。
+              </div>
+            </div>
+            <TextArea
+              label="短信文案"
+              value={draft.successSmsTemplate}
+              onChange={(successSmsTemplate) => setDraft({ ...draft, successSmsTemplate })}
+            />
+          </div>
           <div className="rounded-xl border border-slate-200 p-4">
             <div className="mb-3 text-sm font-semibold text-slate-950">小程序分享海报配置</div>
             <div className="grid gap-3">
@@ -2408,6 +2749,7 @@ function AdminSessions({
   readonly,
   updateSession,
   addSession,
+  cancelSession,
 }: {
   exhibitionId: string;
   sessions: ExhibitionSession[];
@@ -2415,6 +2757,7 @@ function AdminSessions({
   readonly: boolean;
   updateSession: (next: ExhibitionSession) => void;
   addSession: (next: ExhibitionSession) => void;
+  cancelSession: (sessionId: string) => void;
 }) {
   const [creating, setCreating] = useState(false);
 
@@ -2450,9 +2793,10 @@ function AdminSessions({
             <Th>场次名称</Th>
             <Th>日期</Th>
             <Th>时间</Th>
-            <Th>总库存/对外库存</Th>
-            <Th>客用已报名</Th>
-            <Th>客用剩余</Th>
+            <Th>总库存</Th>
+            <Th>场次开始前报名截止</Th>
+            <Th>已报名</Th>
+            <Th>剩余库存</Th>
             <Th>内部代报名</Th>
             <Th>状态</Th>
             <Th>操作</Th>
@@ -2460,7 +2804,7 @@ function AdminSessions({
         </thead>
         <tbody>
           {sessions.map((session) => (
-            <SessionRow key={session.sessionId} session={session} bookings={bookings} readonly={readonly} updateSession={updateSession} />
+            <SessionRow key={session.sessionId} session={session} bookings={bookings} readonly={readonly} updateSession={updateSession} cancelSession={cancelSession} />
           ))}
         </tbody>
       </Table>
@@ -2483,12 +2827,13 @@ function NewSessionForm({
     startTime: "14:00",
     endTime: "16:00",
     totalStock: 30,
+    bookingCloseHours: 12,
   });
 
   return (
     <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div className="mb-3 text-sm font-semibold text-slate-950">新增场次</div>
-      <div className="grid gap-3 md:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-6">
         <label className="block text-sm md:col-span-1">
           <span className="mb-1 block font-medium text-slate-700">场次名称</span>
           <input
@@ -2533,6 +2878,18 @@ function NewSessionForm({
             className="w-full rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-slate-950"
           />
         </label>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">场次开始前报名截止</span>
+          <div className="flex items-center overflow-hidden rounded-lg border border-slate-200 bg-white focus-within:border-slate-950">
+            <input
+              type="number"
+              value={draft.bookingCloseHours}
+              onChange={(event) => setDraft({ ...draft, bookingCloseHours: Number(event.target.value) || 0 })}
+              className="min-w-0 flex-1 px-3 py-2 outline-none"
+            />
+            <span className="shrink-0 border-l border-slate-200 px-3 text-sm text-slate-500">小时</span>
+          </div>
+        </label>
       </div>
       <div className="mt-4 flex justify-end gap-2">
         <button onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
@@ -2548,6 +2905,7 @@ function NewSessionForm({
               endTime: composeDateTime(draft.date, draft.endTime),
               totalStock: Math.max(draft.totalStock, 0),
               bookedCount: 0,
+              bookingCloseHours: Math.max(draft.bookingCloseHours, 0),
               status: "open",
             })
           }
@@ -2565,11 +2923,13 @@ function SessionRow({
   bookings,
   readonly,
   updateSession,
+  cancelSession,
 }: {
   session: ExhibitionSession;
   bookings: Booking[];
   readonly: boolean;
   updateSession: (next: ExhibitionSession) => void;
+  cancelSession: (sessionId: string) => void;
 }) {
   const [draft, setDraft] = useState(session);
   React.useEffect(() => setDraft(session), [session]);
@@ -2608,7 +2968,16 @@ function SessionRow({
           />
         </div>
       </Td>
-      <Td><InlineInput type="number" disabled={readonly} value={String(draft.totalStock)} onChange={(value) => setDraft({ ...draft, totalStock: Number(value) || 0 })} /></Td>
+      <Td><InlineInput compact type="number" disabled={readonly} value={String(draft.totalStock)} onChange={(value) => setDraft({ ...draft, totalStock: Number(value) || 0 })} /></Td>
+      <Td>
+        <InlineNumberWithSuffix
+          compact
+          disabled={readonly}
+          value={String(draft.bookingCloseHours ?? 12)}
+          suffix="小时"
+          onChange={(value) => setDraft({ ...draft, bookingCloseHours: Number(value) || 0 })}
+        />
+      </Td>
       <Td>{draft.bookedCount}</Td>
       <Td>{remainingStock(draft)}</Td>
       <Td>{internalBookedCount(bookings, draft.sessionId)}</Td>
@@ -2630,6 +2999,17 @@ function SessionRow({
             >
               保存
             </AdminAction>
+            {draft.status !== "closed" && (
+              <AdminAction
+                tone="danger"
+                onClick={() => {
+                  const ok = window.confirm(`确认取消场次「${draft.sessionName}」吗？确认后该场次报名将批量变为已取消。`);
+                  if (ok) cancelSession(draft.sessionId);
+                }}
+              >
+                取消场次
+              </AdminAction>
+            )}
           </div>
         )}
       </Td>
@@ -2639,24 +3019,74 @@ function SessionRow({
 
 function BookingList(props: {
   bookings: Booking[];
+  allBookings: Booking[];
   exhibitions: Exhibition[];
   sessions: ExhibitionSession[];
   cancelBooking: (bookingId: string) => void;
   checkInBooking: (bookingId: string) => void;
 }) {
   const [statusFilter, setStatusFilter] = useState<"all" | BookingStatus>("all");
-  const rows = props.bookings.filter((item) => statusFilter === "all" || item.status === statusFilter);
+  const [memberQuery, setMemberQuery] = useState("");
+  const [detailBooking, setDetailBooking] = useState<Booking | null>(null);
+  const rows = props.bookings.filter((item) => {
+    const matchedStatus = statusFilter === "all" || item.status === statusFilter;
+    const keyword = memberQuery.trim().toLowerCase();
+    const matchedMember =
+      !keyword ||
+      [item.memberName, item.memberId, item.memberPhone].some((value) =>
+        value.toLowerCase().includes(keyword),
+      );
+    return matchedStatus && matchedMember;
+  });
+  function exportRows() {
+    const headers = ["预约码", "会员ID", "会员姓名", "手机号", "会员等级", "场次", "状态", "创建时间", "来源", "销售顾问"];
+    const lines = rows.map((booking) => {
+      const session = props.sessions.find((item) => item.sessionId === booking.sessionId);
+      return [
+        booking.bookingCode,
+        booking.memberId,
+        booking.memberName,
+        booking.memberPhone,
+        booking.memberLevel,
+        session ? `${session.sessionName} ${formatRange(session.startTime, session.endTime)}` : "",
+        bookingStatusText(booking.status),
+        booking.createdAt,
+        bookingSourceText(booking.source),
+        booking.salesUserName ?? "",
+      ]
+        .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+        .join(",");
+    });
+    const blob = new Blob([[headers.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `报名名单-${nowText().replace(/[: ]/g, "-")}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <Panel
       title="报名名单"
       action={
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | BookingStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-          <option value="all">全部状态</option>
-          <option value="pending_checkin">待签到</option>
-          <option value="cancelled">已取消</option>
-          <option value="checked_in">已签到</option>
-          <option value="expired">已过期</option>
-        </select>
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={memberQuery}
+            onChange={(event) => setMemberQuery(event.target.value)}
+            placeholder="按会员姓名/卡号/手机号查询"
+            className="h-10 min-w-64 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-950"
+          />
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | BookingStatus)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <option value="all">全部状态</option>
+            <option value="pending_checkin">待签到</option>
+            <option value="cancelled">已取消</option>
+            <option value="checked_in">已签到</option>
+            <option value="expired">已过期</option>
+          </select>
+          <button onClick={exportRows} className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
+            导出
+          </button>
+        </div>
       }
     >
       <Table>
@@ -2742,7 +3172,7 @@ function BookingList(props: {
                 </Td>
                 <Td>
                   <div className="flex flex-wrap gap-2">
-                    <AdminAction onClick={() => window.alert(JSON.stringify(booking, null, 2))}>查看详情</AdminAction>
+                    <AdminAction onClick={() => setDetailBooking(booking)}>查看详情</AdminAction>
                     <AdminAction onClick={() => props.cancelBooking(booking.bookingId)}>取消报名</AdminAction>
                     <AdminAction onClick={() => props.checkInBooking(booking.bookingId)}>模拟签到</AdminAction>
                   </div>
@@ -2752,7 +3182,76 @@ function BookingList(props: {
           })}
         </tbody>
       </Table>
+      {detailBooking && (
+        <MemberDetailModal
+          booking={detailBooking}
+          allBookings={props.allBookings}
+          exhibitions={props.exhibitions}
+          sessions={props.sessions}
+          onClose={() => setDetailBooking(null)}
+        />
+      )}
     </Panel>
+  );
+}
+
+function MemberDetailModal({
+  booking,
+  allBookings,
+  exhibitions,
+  sessions,
+  onClose,
+}: {
+  booking: Booking;
+  allBookings: Booking[];
+  exhibitions: Exhibition[];
+  sessions: ExhibitionSession[];
+  onClose: () => void;
+}) {
+  const memberBookings = allBookings.filter((item) => item.memberId === booking.memberId);
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
+      <section className="max-h-[86vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="text-lg font-semibold text-slate-950">会员信息详情</div>
+            <div className="mt-1 text-sm text-slate-500">{booking.memberName} · {booking.memberId}</div>
+          </div>
+          <button onClick={onClose} className="rounded-lg border border-slate-200 p-2 text-slate-500">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <ReadonlyField label="姓名" value={booking.memberName} />
+          <ReadonlyField label="手机号" value={booking.memberPhone} />
+          <ReadonlyField label="会员等级" value={booking.memberLevel} />
+          <ReadonlyField label="报名次数" value={`${memberBookings.length}`} />
+        </div>
+        <div className="mt-5 text-sm font-semibold text-slate-950">该会员报名活动记录</div>
+        <div className="mt-3 space-y-3">
+          {memberBookings.map((item) => {
+            const exhibition = exhibitions.find((target) => target.exhibitionId === item.exhibitionId);
+            const session = sessions.find((target) => target.sessionId === item.sessionId);
+            return (
+              <div key={item.bookingId} className="rounded-2xl border border-slate-100 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-slate-950">{exhibition?.title ?? "活动缺失"}</div>
+                    <div className="mt-1 text-sm text-slate-500">
+                      {session ? `${session.sessionName} · ${formatRange(session.startTime, session.endTime)}` : "场次缺失"}
+                    </div>
+                  </div>
+                  <BookingStatusPill status={item.status} />
+                </div>
+                <div className="mt-3 text-xs text-slate-500">
+                  {item.bookingCode} · {item.createdAt} · {bookingSourceText(item.source)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -2849,7 +3348,7 @@ function Panel({ title, children, action }: { title: string; children: React.Rea
 }
 
 function Table({ children }: { children: React.ReactNode }) {
-  return <div className="scrollbar-thin overflow-x-auto"><table className="w-full min-w-[920px] border-collapse text-left text-sm">{children}</table></div>;
+  return <div className="scrollbar-thin overflow-x-auto"><table className="w-full min-w-[1280px] border-collapse text-left text-sm">{children}</table></div>;
 }
 
 function Th({ children }: { children: React.ReactNode }) {
@@ -2928,11 +3427,13 @@ function InlineInput({
   onChange,
   type = "text",
   disabled = false,
+  compact = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   type?: string;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   return (
     <input
@@ -2940,8 +3441,35 @@ function InlineInput({
       value={value}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
-      className="w-full min-w-28 rounded-lg border border-slate-200 px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+      className={`${compact ? "w-20 min-w-20" : "w-full min-w-28"} rounded-lg border border-slate-200 px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-500`}
     />
+  );
+}
+
+function InlineNumberWithSuffix({
+  value,
+  onChange,
+  suffix,
+  disabled = false,
+  compact = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  suffix: string;
+  disabled?: boolean;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`flex ${compact ? "w-24 min-w-24" : "min-w-32"} items-center overflow-hidden rounded-lg border border-slate-200 bg-white`}>
+      <input
+        type="number"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-w-0 flex-1 px-2 py-1 text-sm outline-none disabled:bg-slate-50 disabled:text-slate-500"
+      />
+      <span className="shrink-0 border-l border-slate-200 px-2 text-xs text-slate-500">{suffix}</span>
+    </div>
   );
 }
 
